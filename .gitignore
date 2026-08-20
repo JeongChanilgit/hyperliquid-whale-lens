@@ -1,0 +1,49 @@
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.kdbx
+
+# JavaScript/Python dependencies and build output
+node_modules/
+.pnp/
+.yarn/
+.next/
+.vinext/
+.wrangler/
+.venv/
+__pycache__/
+*.pyc
+coverage/
+dist/
+/build/
+/dashboard/build/*
+!/dashboard/build/sites-vite-plugin.ts
+out/
+outputs/
+*.tsbuildinfo
+
+# Runtime state: never commit a running SQLite database or audit log
+data/
+logs/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pid
+
+# Local packaging/caches
+work/
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*

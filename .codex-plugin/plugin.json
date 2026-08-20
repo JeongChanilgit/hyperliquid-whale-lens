@@ -1,0 +1,28 @@
+{
+  "name": "hyperliquid-whale-lens",
+  "version": "0.1.0",
+  "description": "Operate the private Hyperliquid Whale Lens screening, dashboard, and copy-trading research workspace.",
+  "author": {
+    "name": "JeongChanilgit",
+    "url": "https://github.com/JeongChanilgit"
+  },
+  "homepage": "https://github.com/JeongChanilgit/hyperliquid-whale-lens",
+  "repository": "https://github.com/JeongChanilgit/hyperliquid-whale-lens",
+  "keywords": ["hyperliquid", "whale", "trading", "simulation", "dashboard"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Hyperliquid Whale Lens",
+    "shortDescription": "Open and operate the private Whale Lens workspace.",
+    "longDescription": "Work with the local-first Hyperliquid whale screener, trading dashboard, preloaded TOP 50 data, and simulation copy runner while keeping credentials and live execution gated.",
+    "developerName": "JeongChanilgit",
+    "category": "Finance",
+    "capabilities": ["Read", "Write", "Execute"],
+    "defaultPrompt": [
+      "Open Whale Lens and show the local simulation status.",
+      "Inspect the TOP 50 whale data and trading logs.",
+      "Run the focused Whale Lens verification tests."
+    ],
+    "brandColor": "#9DFF3F"
+  }
+}
+
