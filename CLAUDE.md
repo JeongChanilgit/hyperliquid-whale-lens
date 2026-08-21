@@ -22,6 +22,7 @@ This project inherits the global Claude workflow from `C:/Users/peter/.claude/CL
 - Canonical runner rule: a new copy-runner session must load `state/perp-twr-top10/latest_active_top10.json` and cross-check the matching discovery report and TOP2000 hashes; stale or partial output must fail closed.
 - Explicit research exception: only after the user expressly authorizes the current turn, a SIMULATION-only session may use `VERIFIED_PARTIAL_RESEARCH` artifacts under `reports/perp-twr-research/` and `state/perp-twr-research/`. It must still require strict VERIFIED TWR, complete outside-shard coverage, zero outside-pool breach, at least 10 raw-fill episodes, hash-linked TOP10/TOP50 artifacts, and `COPY_RUNNER_ALLOW_PARTIAL_RESEARCH=true`; it never becomes canonical or live-capable.
 - Local-first rule: run `npm run local:start` from `dashboard/`; publish, redeploy, or delete a Sites deployment only on explicit user request.
+- Local paper-entry rule: `npm run local:start` must enforce `NEW_POSITIONS_ONLY`, so every follower begins with zero tracked position while post-start additions and new flat-to-open positions remain eligible for copying.
 - Workflow rule: each task-unit workflow must list step-level allowed read paths. During a step, read only those folders/files unless the workflow is updated first.
 - Cross-AI sync rule: when file map, task units, or workflow locations change, update both `AGENTS.md` and `CLAUDE.md` in the same turn.
 

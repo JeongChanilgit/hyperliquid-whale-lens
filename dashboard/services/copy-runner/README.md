@@ -15,7 +15,7 @@ COPY_RUNNER_FOLLOWER_CAPITAL_USD=1000
 COPY_RUNNER_MAX_ACCOUNT_STATE_AGE_MS=60000
 COPY_RUNNER_MIN_SOURCE_ACCOUNT_VALUE_USD=10000
 COPY_RUNNER_MODE=SIMULATION
-COPY_RUNNER_ENTRY_POLICY=REPLAY_OPEN_EPISODES
+COPY_RUNNER_ENTRY_POLICY=NEW_POSITIONS_ONLY
 COPY_RUNNER_MAX_NOTIONAL_USD=1000000000
 COPY_RUNNER_MAX_DAILY_LOSS_USD=100
 COPY_RUNNER_HOST=127.0.0.1
@@ -29,7 +29,7 @@ The hash-verified canonical TOP 10 each own a separate $100 paper wallet. A new 
 
 The explicitly authorized one-or-more-fill research cohort is still simulation-only. Set `COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH=true` and provide `COPY_RUNNER_RESCUE_SUMMARY` plus `COPY_RUNNER_ACTIVITY_CENSUS`. Its loader requires a terminal result for every preserved account, recomputes the global exact-TWR TOP10 among fill-positive accounts, and cross-checks the census, rescue summary, cohort, ordered-wallet, config, and discovery-pool hashes. The local lifecycle script supplies these paths automatically with `-AllowTradeQualifiedResearch`; this gate is rejected in live mode.
 
-`COPY_RUNNER_ENTRY_POLICY=NEW_POSITIONS_ONLY` leaves positions already open at session startup—and their reduce-only/TP/SL orders—out of the follower ledger. A same-direction increase after the session starts is tracked as new exposure without adopting the startup balance; later reductions can close only that tracked amount. A flat-to-open entry is copied normally, and a one-fill reversal copies only the new opposite-side remainder. `INCLUDE_EXISTING` retains the legacy source-entry carry-in behavior.
+The login-free local lifecycle uses `COPY_RUNNER_ENTRY_POLICY=NEW_POSITIONS_ONLY` and rejects other startup policies. It leaves positions already open at session startup—and their reduce-only/TP/SL orders—out of the follower ledger, so every paper follower begins with zero tracked position. A same-direction increase after the session starts is tracked as new exposure without adopting the startup balance; later reductions can close only that tracked amount. A flat-to-open entry is copied normally, and a one-fill reversal copies only the new opposite-side remainder. `INCLUDE_EXISTING` retains the legacy source-entry carry-in behavior for explicitly configured non-local runs.
 
 `REPLAY_OPEN_EPISODES` is simulation-only. For each position open at startup, it fetches unaggregated fills for the preceding 30 days and retries with 90 days when a current residual is not yet reconstructable. It accepts an episode only when a flat/reversal boundary, every `startPosition` transition, the final inventory, and the reported average entry price reconcile. Accepted fills are replayed from zero at one fixed bootstrap scale (`$100 / current source total equity` for the seeded setup), so prior entries, additions, and partial exits contribute to the new paper wallet instead of adopting only the residual position. Incomplete API coverage, a missing boundary, or a reconciliation mismatch blocks that current coin; it never falls back to residual adoption. The current open-order snapshot is then attached, and all subsequent fill/order changes are recorded from WebSocket events. Hyperliquid's public REST history does not expose every past order amendment/cancel event, so historical replay is fill-exact rather than a claim of full retrospective order-lifecycle recovery.
 

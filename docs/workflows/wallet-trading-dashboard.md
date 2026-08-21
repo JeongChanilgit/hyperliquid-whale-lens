@@ -5,6 +5,7 @@
 2. Work on dashboard data behavior.
    - Allowed reads: `dashboard/app/lib/`, `dashboard/app/api/copy-engine/`, `dashboard/app/api/audit/`, `dashboard/db/`, `dashboard/drizzle/`, `dashboard/scripts/`, `dashboard/services/copy-runner/`, `dashboard/app/page.tsx`, `dashboard/package.json`.
    - Preserve lazy candle loading, IndexedDB reuse, explicit refresh, 30-day fill pagination, idempotent real-time fill handling, localhost-only runner control, and all three explicit paper entry policies. `REPLAY_OPEN_EPISODES` must remain simulation-only, reconstruct only verified flat/reversal-to-current fill chains, and fail closed instead of adopting an unverifiable residual position.
+   - The login-free local lifecycle must default to and enforce `NEW_POSITIONS_ONLY`: every follower starts with zero tracked position, while post-start additions and new flat-to-open positions remain copyable.
    - A partial-research selection is permitted only with an explicit user authorization, hash-linked research artifacts, matching ACTIVE seeds, and `COPY_RUNNER_ALLOW_PARTIAL_RESEARCH=true`; the config must reject it outside `SIMULATION`.
 3. Work on dashboard presentation.
    - Allowed reads: `dashboard/app/page.tsx`, `dashboard/app/layout.tsx`, `dashboard/app/globals.css`, `dashboard/app/components/`, `dashboard/public/`.

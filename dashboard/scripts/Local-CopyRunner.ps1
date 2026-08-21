@@ -11,7 +11,7 @@ param(
   [ValidateRange(1, 365)]
   [int]$SessionDays = 7,
   [ValidateSet('REPLAY_OPEN_EPISODES', 'NEW_POSITIONS_ONLY', 'INCLUDE_EXISTING')]
-  [string]$EntryPolicy = 'REPLAY_OPEN_EPISODES',
+  [string]$EntryPolicy = 'NEW_POSITIONS_ONLY',
   [string]$AllowedSymbols = '*',
   [switch]$AllowPartialResearch,
   [switch]$AllowTradeQualifiedResearch,
@@ -59,8 +59,8 @@ function Assert-CanonicalPaperStart {
   if ($SessionDays -ne 7) {
     throw 'Local paper start always creates an exact 7-day session.'
   }
-  if ($EntryPolicy -ne 'REPLAY_OPEN_EPISODES') {
-    throw 'Local paper start always uses REPLAY_OPEN_EPISODES.'
+  if ($EntryPolicy -ne 'NEW_POSITIONS_ONLY') {
+    throw 'Local paper start always uses NEW_POSITIONS_ONLY so every follower starts with zero tracked position.'
   }
   if ($AllowedSymbols -ne '*') {
     throw 'Local paper start always monitors all canonical source symbols.'
