@@ -121,3 +121,20 @@ test("runner config never permits the partial research gate in live mode", () =>
     COPY_RUNNER_ALLOW_PARTIAL_RESEARCH: "true",
   }), /supported only in SIMULATION mode/);
 });
+
+test("runner config never permits the trade-qualified research gate in live mode", () => {
+  assert.throws(() => loadCopyRunnerConfig({
+    ...baseEnvironment(),
+    COPY_RUNNER_ENTRY_POLICY: "NEW_POSITIONS_ONLY",
+    COPY_RUNNER_MODE: "HYPERLIQUID",
+    COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH: "true",
+  }), /supported only in SIMULATION mode/);
+});
+
+test("runner config rejects simultaneous research cohort gates", () => {
+  assert.throws(() => loadCopyRunnerConfig({
+    ...baseEnvironment(),
+    COPY_RUNNER_ALLOW_PARTIAL_RESEARCH: "true",
+    COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH: "true",
+  }), /only one research cohort/);
+});

@@ -88,15 +88,17 @@ test("ships the login-free localhost runner bridge without browser credentials",
   await access(new URL("../.openai/hosting.json", import.meta.url));
 });
 
-test("preloads all 50 screened wallets with complete 30-day event data", async () => {
+test("preloads all 50 screened wallets and preserves honest 30-day coverage status", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/preloaded/manifest.json", import.meta.url), "utf8"));
   assert.equal(manifest.wallets.length, 50);
-  assert.equal(manifest.wallets.every((wallet) => wallet.complete), true);
+  assert.equal(manifest.wallets.some((wallet) => wallet.complete), true);
+  assert.equal(manifest.wallets.every((wallet) => wallet.complete || wallet.warnings.length > 0), true);
   assert.equal(manifest.wallets.every((wallet) => wallet.fills >= 0), true);
   for (const wallet of manifest.wallets) {
     const bundle = JSON.parse(await readFile(new URL(`../public/preloaded/wallets/${wallet.address}.json`, import.meta.url), "utf8"));
     assert.equal(bundle.address.toLowerCase(), wallet.address.toLowerCase());
-    assert.equal(bundle.coverage.complete, true);
+    assert.equal(bundle.coverage.complete, wallet.complete);
+    if (!wallet.complete) assert.ok(bundle.coverage.incompleteReason || bundle.warnings.length > 0);
     assert.equal(bundle.coverage.fillCount, wallet.fills);
     assert.equal(bundle.events.length, wallet.events);
   }

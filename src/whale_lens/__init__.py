@@ -15,7 +15,12 @@ from .models import (
     TWRResult,
 )
 from .portfolio import normalize_perp_month
+from .evidence_registry import ActivityStatus, DataQualityStatus, EvidenceRegistry, SelectionStatus
+from .interval_twr import calculate_interval_rescue
+from .reconciliation import reconcile_blocks
+from .rescue import build_rescue_report, select_trade_qualified_top10
 from .twr import calculate_provisional_perp_twr, calculate_verified_perp_twr
+from .valuation import recover_flow_value
 
 __all__ = [
     "CashFlowClassification",
@@ -24,9 +29,18 @@ __all__ = [
     "PerpPortfolioSample",
     "ReasonCode",
     "TWRResult",
+    "ActivityStatus",
+    "DataQualityStatus",
+    "EvidenceRegistry",
+    "SelectionStatus",
+    "build_rescue_report",
+    "calculate_interval_rescue",
     "calculate_provisional_perp_twr",
     "calculate_verified_perp_twr",
     "classify_non_funding_delta",
     "dedupe_ledger_events",
     "normalize_perp_month",
+    "reconcile_blocks",
+    "recover_flow_value",
+    "select_trade_qualified_top10",
 ]

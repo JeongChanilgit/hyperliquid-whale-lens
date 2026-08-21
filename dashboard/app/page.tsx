@@ -7,6 +7,7 @@ import TradingChart, {
   type TradingChartMarkerKind,
 } from "./components/TradingChart";
 import CopyTradingPanel from "./components/CopyTradingPanel";
+import RescueAnalysisPanel from "./components/RescueAnalysisPanel";
 import TradeReturnAnalysis, { buildFlowNeutralPortfolioPerformance } from "./components/TradeReturnAnalysis";
 import { useLiveCopySession } from "./hooks/use-live-copy-session";
 import {
@@ -28,7 +29,7 @@ type WalletItem = {
   status: "ACTIVE" | "PASS" | "WATCH";
 };
 
-type ProductModule = "analysis" | "paper" | "live";
+type ProductModule = "analysis" | "rescue" | "paper" | "live";
 
 const WALLET_STORAGE_KEY = "whale-lens-wallets-v3-compounded-top50";
 const LEGACY_WALLET_STORAGE_KEYS = ["whale-lens-wallets-v2-cashflow-top30"] as const;
@@ -433,6 +434,13 @@ export default function Home() {
 
         <nav className="mode-nav" aria-label="제품 모듈">
           <button
+            className={`mode-nav__item ${productModule === "rescue" ? "is-active" : ""}`}
+            type="button"
+            onClick={() => setProductModule("rescue")}
+          >
+            계좌 구제 <small>EVIDENCE</small>
+          </button>
+          <button
             className={`mode-nav__item ${productModule === "analysis" ? "is-active" : ""}`}
             type="button"
             onClick={() => setProductModule("analysis")}
@@ -727,6 +735,8 @@ export default function Home() {
           </section>
         </aside>
       </section>
+      ) : productModule === "rescue" ? (
+        <RescueAnalysisPanel />
       ) : (
         <section className="copy-workspace">
           <div className="copy-workspace__intro">

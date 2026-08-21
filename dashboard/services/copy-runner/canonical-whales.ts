@@ -19,7 +19,7 @@ export interface CanonicalTop10 {
   configHash: string;
   candidatePoolHash: string;
   reportSha256: string;
-  selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH";
+  selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH" | "TRADE_QUALIFIED_TWR_RESEARCH";
   researchOverride: boolean;
   wallets: CanonicalWhale[];
 }

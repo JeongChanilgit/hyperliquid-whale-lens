@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -34,6 +34,7 @@ from .discovery import (
     record_outside_pool_sample,
 )
 from .episodes import FILL_AVAILABILITY_LIMIT, reconstruct_completed_episodes
+from .evidence_registry import EvidenceRegistry
 from .ledger import LedgerCoverageTracker, classify_non_funding_ledger, count_ledger_delta_types, dedupe_ledger_events
 from .portfolio import normalize_perp_month
 from .report import (
@@ -46,7 +47,9 @@ from .report import (
     write_canonical_state_if_complete,
     write_json_atomic,
     write_report_bundle,
+    write_text_atomic,
 )
+from .rescue import build_rescue_markdown, build_rescue_report
 from .twr import calculate_provisional_perp_twr, calculate_verified_perp_twr
 
 
@@ -144,6 +147,14 @@ class ScreenPaths:
     def discovery_state(self) -> Path:
         return self.state_root / "perp-twr-discovery"
 
+    @property
+    def rescue_reports(self) -> Path:
+        return self.reports_root / "perp-twr-rescue"
+
+    @property
+    def evidence_registry(self) -> Path:
+        return self.state_root / "account-evidence-registry"
+
 
 def _json_hash(value: Any) -> str:
     encoded = json.dumps(to_jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -235,6 +246,8 @@ class WhaleScreenPipeline:
         if api is not None and hasattr(api, "budgets"):
             self.budgets = api.budgets
         self.cache = RawResponseCache(paths.cache_root)
+        self.evidence_registry = EvidenceRegistry(paths.evidence_registry)
+        self.raw_artifact_refs: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
         self.checkpoints = CheckpointStore(paths.checkpoints)
         self.errors: list[dict[str, Any]] = []
         self.delta_type_counts: Counter[str] = Counter()
@@ -259,10 +272,21 @@ class WhaleScreenPipeline:
     def _cached(self, wallet: str | None, endpoint: str, fetch: Callable[[], Any], *, metadata: Mapping[str, Any] | None = None) -> Any:
         key = self._cache_key(wallet, endpoint)
         cached = self.cache.get(key)
-        if cached is not None:
-            return cached
-        value = fetch()
-        self.cache.put(key, value, metadata=metadata)
+        if cached is None:
+            value = fetch()
+            self.cache.put(key, value, metadata=metadata)
+        else:
+            value = cached
+        ref = self.evidence_registry.preserve_raw_artifact(
+            endpoint=endpoint,
+            run_id=self.run_id,
+            captured_at_ms=self.as_of_ms,
+            wallet=wallet,
+            request_identity=key.to_dict(),
+            coverage=metadata,
+            payload=value,
+        )
+        self.raw_artifact_refs[wallet or "<RUN>"].append(ref.to_dict())
         return value
 
     def _error_row(self, wallet: str | None, stage: str, exc: BaseException) -> dict[str, Any]:
@@ -805,6 +829,26 @@ class WhaleScreenPipeline:
             finalist_rows=finalists.finalists if finalists else (),
             errors=self.errors,
         )
+        rescue_report = build_rescue_report(
+            report,
+            cache=self.cache,
+            registry=self.evidence_registry,
+        )
+        rescue_run_json = self.paths.rescue_reports / f"run-{self.run_id}.json"
+        rescue_run_md = self.paths.rescue_reports / f"run-{self.run_id}.md"
+        write_json_atomic(rescue_run_json, rescue_report)
+        write_json_atomic(self.paths.rescue_reports / "latest.json", rescue_report)
+        rescue_markdown = build_rescue_markdown(rescue_report)
+        write_text_atomic(rescue_run_md, rescue_markdown)
+        write_text_atomic(self.paths.rescue_reports / "latest.md", rescue_markdown)
+        report["account_preservation_rescue"] = {
+            "schema_version": rescue_report["schema_version"],
+            "rescue_engine_version": rescue_report["rescue_engine_version"],
+            "discovered_accounts": rescue_report["discovered_accounts"],
+            "quality_counts": rescue_report["quality_counts"],
+            "reason_counts": rescue_report["reason_counts"],
+            "rescue_queue_count": rescue_report["rescue_queue_count"],
+        }
         digest = report_sha256(report)
         canonical = build_canonical_state(
             report,

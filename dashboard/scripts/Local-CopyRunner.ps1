@@ -14,6 +14,7 @@ param(
   [string]$EntryPolicy = 'REPLAY_OPEN_EPISODES',
   [string]$AllowedSymbols = '*',
   [switch]$AllowPartialResearch,
+  [switch]$AllowTradeQualifiedResearch,
   [int]$RunnerPort = 8788,
   [int]$SitePort = 3000
 )
@@ -21,13 +22,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $dashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $projectRoot = (Resolve-Path (Join-Path $dashboardRoot '..')).Path
-$canonicalStatePath = if ($AllowPartialResearch) {
+$canonicalStatePath = if ($AllowTradeQualifiedResearch) {
+  Join-Path $projectRoot 'state\perp-twr-trade-qualified\latest_active_top10.json'
+} elseif ($AllowPartialResearch) {
   Join-Path $projectRoot 'state\perp-twr-research\latest_active_top10.json'
 } else { Join-Path $projectRoot 'state\perp-twr-top10\latest_active_top10.json' }
-$canonicalReportPath = if ($AllowPartialResearch) {
+$canonicalReportPath = if ($AllowTradeQualifiedResearch) {
+  Join-Path $projectRoot 'reports\perp-twr-trade-qualified\latest.json'
+} elseif ($AllowPartialResearch) {
   Join-Path $projectRoot 'reports\perp-twr-research\latest.json'
 } else { Join-Path $projectRoot 'reports\perp-twr-discovery\latest.json' }
-$canonicalCandidatesPath = if ($AllowPartialResearch) {
+$canonicalCandidatesPath = if ($AllowTradeQualifiedResearch) {
+  Join-Path $projectRoot 'reports\perp-twr-rescue\latest-summary.json'
+} elseif ($AllowPartialResearch) {
   Join-Path $projectRoot 'reports\perp-twr-research\latest-candidates.json'
 } else { Join-Path $projectRoot 'reports\perp-twr-candidates\latest-top2000.json' }
 $stateRoot = Join-Path $env:LOCALAPPDATA 'WhaleLens'
@@ -36,6 +43,9 @@ $localSimulationToken = 'whale-lens-local-simulation-only-v1'
 
 function Assert-CanonicalPaperStart {
   if ($Action -ne 'Start') { return }
+  if ($AllowPartialResearch -and $AllowTradeQualifiedResearch) {
+    throw 'Choose either partial research or trade-qualified research, not both.'
+  }
   if ($WhaleAddress.Count -ne 0) {
     throw 'Local paper start always uses the hash-linked selected TOP 10; WhaleAddress overrides are not allowed.'
   }
@@ -194,7 +204,7 @@ function Start-LocalStack {
   $sessionEndsAtMs = $sessionStartedAtMs + ([int64]$SessionDays * 86400000)
   $sessionStamp = [DateTimeOffset]::FromUnixTimeMilliseconds($sessionStartedAtMs).UtcDateTime.ToString('yyyyMMddTHHmmssfffZ')
   $sessionNonce = [guid]::NewGuid().ToString('N')
-  $selectionSuffix = if ($AllowPartialResearch) { 'research-top10' } else { 'canonical-top10' }
+  $selectionSuffix = if ($AllowTradeQualifiedResearch) { 'trade-qualified-top10' } elseif ($AllowPartialResearch) { 'research-top10' } else { 'canonical-top10' }
   $sessionDatabase = Join-Path $dashboardRoot "data\sessions\paper-$sessionStamp-$sessionNonce-$selectionSuffix-${SessionDays}d.sqlite"
   if (Test-Path -LiteralPath $sessionDatabase) {
     throw "Refusing to reuse an existing paper-session database: $sessionDatabase"
@@ -209,13 +219,20 @@ function Start-LocalStack {
     COPY_RUNNER_REQUIRE_FLAT_START = 'true'
     COPY_RUNNER_ENTRY_POLICY = $EntryPolicy
     COPY_RUNNER_FOLLOWER_CAPITAL_USD = [string]$FollowerCapitalUsd
+    # The $10k filter is fixed at the cohort's screening as-of. Reapplying it
+    # during the experiment would censor a whale precisely after a drawdown.
+    # This exception is simulation-only and available only to the hash-linked
+    # trade-qualified research cohort.
+    COPY_RUNNER_MIN_SOURCE_ACCOUNT_VALUE_USD = $(if ($AllowTradeQualifiedResearch) { '0' } else { '10000' })
     COPY_RUNNER_SESSION_STARTED_AT_MS = [string]$sessionStartedAtMs
     COPY_RUNNER_SESSION_ENDS_AT_MS = [string]$sessionEndsAtMs
     COPY_RUNNER_DATABASE = $sessionDatabase
     COPY_RUNNER_CANONICAL_STATE = $canonicalStatePath
     COPY_RUNNER_CANONICAL_REPORT = $canonicalReportPath
     COPY_RUNNER_CANONICAL_CANDIDATES = $canonicalCandidatesPath
+    COPY_RUNNER_RESCUE_SUMMARY = $canonicalCandidatesPath
     COPY_RUNNER_ALLOW_PARTIAL_RESEARCH = $(if ($AllowPartialResearch) { 'true' } else { 'false' })
+    COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH = $(if ($AllowTradeQualifiedResearch) { 'true' } else { 'false' })
     HYPERLIQUID_ENABLED = 'false'
     HYPERLIQUID_TESTNET = 'true'
     HYPERLIQUID_AGENT_PRIVATE_KEY = ''

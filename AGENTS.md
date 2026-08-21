@@ -48,6 +48,7 @@ This managed section is the base layer for project instructions. Project-specifi
 - Rule: consult the file map before broad source reads, and update it when structure, entrypoints, generated areas, or do-not-touch zones change.
 - Task units:
   - Daily whale screening: `docs/workflows/daily-whale-screen.md`.
+  - Account preservation and rescue: `docs/workflows/account-preservation-rescue.md`.
   - Wallet trading dashboard: `docs/workflows/wallet-trading-dashboard.md`.
 - Screening rule: rank only by ledger-verified `perp_cashflow_neutral_twr_30d`, freeze VERIFIED TOP2000, then require at least 10 completed raw-fill position episodes for ACTIVE TOP10. Leaderboard ROI/PnL/turnover are discovery signals; MDD is diagnostic only.
 - Fixed-window sample rule: use only real aligned `perpMonth` observations inside the run-wide fixed 30-day window; do not interpolate or relabel a nearby out-of-window observation as an exact boundary, and exclude wallets with fewer than two in-window observations.

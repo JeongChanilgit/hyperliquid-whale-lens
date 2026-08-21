@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { CopyEngineConfig, CopyEntryPolicy, CopyMode, WhaleConfig } from "../../app/lib/copy-types";
 import { SEED_WALLETS } from "../../app/seed-wallets";
 import { loadCanonicalTop10 } from "./canonical-whales";
+import { loadTradeQualifiedTop10 } from "./trade-qualified-whales";
 
 export interface CopyRunnerConfig {
   engine: CopyEngineConfig;
@@ -19,7 +20,7 @@ export interface CopyRunnerConfig {
     rankingScope: string;
     configHash: string;
     candidatePoolHash: string;
-    selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH";
+    selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH" | "TRADE_QUALIFIED_TWR_RESEARCH";
     researchOverride: boolean;
   };
   session?: {
@@ -56,6 +57,9 @@ const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."
 const DEFAULT_CANONICAL_STATE = resolve(PROJECT_ROOT, "state/perp-twr-top10/latest_active_top10.json");
 const DEFAULT_DISCOVERY_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-discovery/latest.json");
 const DEFAULT_CANDIDATE_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-candidates/latest-top2000.json");
+const DEFAULT_TRADE_STATE = resolve(PROJECT_ROOT, "state/perp-twr-trade-qualified/latest_active_top10.json");
+const DEFAULT_TRADE_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-trade-qualified/latest.json");
+const DEFAULT_RESCUE_SUMMARY = resolve(PROJECT_ROOT, "reports/perp-twr-rescue/latest-summary.json");
 
 const parseWhales = (raw: string): WhaleConfig[] => {
   let decoded: unknown;
@@ -89,16 +93,31 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
     throw new Error("COPY_RUNNER_ENTRY_POLICY=REPLAY_OPEN_EPISODES is supported only in SIMULATION mode");
   }
   const allowPartialResearch = env.COPY_RUNNER_ALLOW_PARTIAL_RESEARCH === "true";
+  const allowTradeQualifiedResearch = env.COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH === "true";
+  if (allowPartialResearch && allowTradeQualifiedResearch) {
+    throw new Error("Choose only one research cohort authorization");
+  }
   if (allowPartialResearch && mode !== "SIMULATION") {
     throw new Error("COPY_RUNNER_ALLOW_PARTIAL_RESEARCH is supported only in SIMULATION mode");
   }
-  const canonical = loadCanonicalTop10({
-    statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_CANONICAL_STATE),
-    reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_DISCOVERY_REPORT),
-    candidatePath: resolve(env.COPY_RUNNER_CANONICAL_CANDIDATES?.trim() || DEFAULT_CANDIDATE_REPORT),
-    maxAgeMs: number(env, "COPY_RUNNER_CANONICAL_MAX_AGE_MS", 48 * 60 * 60 * 1_000, 60_000),
-    allowPartialResearch,
-  });
+  if (allowTradeQualifiedResearch && mode !== "SIMULATION") {
+    throw new Error("COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH is supported only in SIMULATION mode");
+  }
+  const maxCanonicalAgeMs = number(env, "COPY_RUNNER_CANONICAL_MAX_AGE_MS", 48 * 60 * 60 * 1_000, 60_000);
+  const canonical = allowTradeQualifiedResearch
+    ? loadTradeQualifiedTop10({
+      statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_TRADE_STATE),
+      reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_TRADE_REPORT),
+      rescueSummaryPath: resolve(env.COPY_RUNNER_RESCUE_SUMMARY?.trim() || DEFAULT_RESCUE_SUMMARY),
+      maxAgeMs: maxCanonicalAgeMs,
+    })
+    : loadCanonicalTop10({
+      statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_CANONICAL_STATE),
+      reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_DISCOVERY_REPORT),
+      candidatePath: resolve(env.COPY_RUNNER_CANONICAL_CANDIDATES?.trim() || DEFAULT_CANDIDATE_REPORT),
+      maxAgeMs: maxCanonicalAgeMs,
+      allowPartialResearch,
+    });
   const canonicalWhales: WhaleConfig[] = canonical.wallets.map((wallet) => ({
     address: wallet.address,
     label: wallet.label,

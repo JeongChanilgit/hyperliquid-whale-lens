@@ -60,11 +60,19 @@ logs/
 !/reports/perp-twr-activity-90d/latest.md
 !/reports/perp-twr-activity-90d/run-*.json
 !/reports/perp-twr-activity-90d/run-*.md
+!/reports/perp-twr-rescue/
+!/reports/perp-twr-rescue/latest.md
+!/reports/perp-twr-rescue/latest-summary.json
+!/reports/perp-twr-trade-qualified/
+!/reports/perp-twr-trade-qualified/latest.json
+!/reports/perp-twr-trade-qualified/run-*.json
 /state/**
 !/state/perp-twr-top10/
 !/state/perp-twr-top10/latest_active_top10.json
 !/state/perp-twr-research/
 !/state/perp-twr-research/latest_active_top10.json
+!/state/perp-twr-trade-qualified/
+!/state/perp-twr-trade-qualified/latest_active_top10.json
 
 # Local packaging/caches
 work/
