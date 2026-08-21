@@ -37,6 +37,7 @@ $canonicalCandidatesPath = if ($AllowTradeQualifiedResearch) {
 } elseif ($AllowPartialResearch) {
   Join-Path $projectRoot 'reports\perp-twr-research\latest-candidates.json'
 } else { Join-Path $projectRoot 'reports\perp-twr-candidates\latest-top2000.json' }
+$activityCensusPath = Join-Path $projectRoot 'reports\perp-twr-activity-census\latest.json'
 $stateRoot = Join-Path $env:LOCALAPPDATA 'WhaleLens'
 $statePath = Join-Path $stateRoot 'local-copy-state.json'
 $localSimulationToken = 'whale-lens-local-simulation-only-v1'
@@ -231,6 +232,7 @@ function Start-LocalStack {
     COPY_RUNNER_CANONICAL_REPORT = $canonicalReportPath
     COPY_RUNNER_CANONICAL_CANDIDATES = $canonicalCandidatesPath
     COPY_RUNNER_RESCUE_SUMMARY = $canonicalCandidatesPath
+    COPY_RUNNER_ACTIVITY_CENSUS = $activityCensusPath
     COPY_RUNNER_ALLOW_PARTIAL_RESEARCH = $(if ($AllowPartialResearch) { 'true' } else { 'false' })
     COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH = $(if ($AllowTradeQualifiedResearch) { 'true' } else { 'false' })
     HYPERLIQUID_ENABLED = 'false'
@@ -256,6 +258,9 @@ function Start-LocalStack {
       if (-not (Test-Path -LiteralPath $canonicalPath -PathType Leaf)) {
         throw "Verified screener output is missing: $canonicalPath. Complete the screener before starting a new runner."
       }
+    }
+    if ($AllowTradeQualifiedResearch -and -not (Test-Path -LiteralPath $activityCensusPath -PathType Leaf)) {
+      throw "Complete preserved-account activity census is missing: $activityCensusPath"
     }
     foreach ($pair in $runnerEnvironment.GetEnumerator()) { [Environment]::SetEnvironmentVariable($pair.Key, $pair.Value, 'Process') }
     $runner = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'copy-runner') -WorkingDirectory $dashboardRoot -WindowStyle Hidden -PassThru

@@ -25,11 +25,8 @@ const fixture = () => {
   const statePath = join(directory, "state.json");
   const reportPath = join(directory, "report.json");
   const rescueSummaryPath = join(directory, "rescue-summary.json");
+  const activityCensusPath = join(directory, "activity-census.json");
   const fullReportHash = hash({ full: "rescue" });
-  const rescue = {
-    source_run_id: "source-run",
-    full_report_canonical_sha256: fullReportHash,
-  };
   const wallets = Array.from({ length: 10 }, (_, index) => ({
     address: `0x${String(index + 1).padStart(40, "0")}`,
     wallet: `0x${String(index + 1).padStart(40, "0")}`,
@@ -40,12 +37,44 @@ const fixture = () => {
     raw_fill_count_30d: index + 1,
     perp_cashflow_neutral_twr_30d: String(2 - index / 10),
   }));
+  const rescue = {
+    source_run_id: "source-run",
+    full_report_canonical_sha256: fullReportHash,
+    accounts: wallets.map((row) => ({
+      wallet: row.wallet,
+      data_quality_status: row.data_quality_status,
+      latest_scores: { exact_twr: row.perp_cashflow_neutral_twr_30d },
+    })),
+  };
+  const accountSetHash = hash(wallets.map((row) => row.wallet));
+  const census = {
+    run_status: "COMPLETE",
+    coverage_complete: true,
+    source_rescue_summary_sha256: hash(rescue),
+    account_set_hash: accountSetHash,
+    preserved_account_count: 10,
+    scanned_account_count: 10,
+    accounts: wallets.map((row) => ({
+      wallet: row.wallet,
+      status: "HAS_FILL",
+      minimum_proven_fill_count_30d: 1,
+      observed_unique_fill_count_30d: row.raw_fill_count_30d,
+    })),
+  };
   const body: Record<string, unknown> = {
-    schema_version: "1",
+    schema_version: "2",
     selection_type: "TRADE_QUALIFIED_TWR_RESEARCH",
+    selection_basis: "FULL_PRESERVED_ACCOUNT_ACTIVITY_CENSUS_EXACT_TWR",
     simulation_only: true,
     minimum_raw_fills_30d: 1,
+    minimum_proven_fills_30d: 1,
+    activity_evidence_scope: "OFFICIAL_PERP_MONTH_VOLUME_OR_UNAGGREGATED_DEFAULT_DEX_FILLS",
     minimum_completed_episodes: null,
+    activity_census_complete: true,
+    activity_census_report_sha256: hash(census),
+    activity_census_account_set_hash: accountSetHash,
+    activity_census_scanned_account_count: 10,
+    activity_census_preserved_account_count: 10,
     source_run_id: "source-run",
     source_as_of_ms: 1_800_000_000_000,
     source_window_start_ms: 1_797_408_000_000,
@@ -63,7 +92,8 @@ const fixture = () => {
   writeFileSync(statePath, JSON.stringify(state));
   writeFileSync(reportPath, JSON.stringify(state));
   writeFileSync(rescueSummaryPath, JSON.stringify(rescue));
-  return { directory, statePath, reportPath, rescueSummaryPath, state };
+  writeFileSync(activityCensusPath, JSON.stringify(census));
+  return { directory, statePath, reportPath, rescueSummaryPath, activityCensusPath, state };
 };
 
 test("loads a hash-linked simulation-only 30D fill-qualified exact TWR TOP10", () => {
@@ -73,6 +103,7 @@ test("loads a hash-linked simulation-only 30D fill-qualified exact TWR TOP10", (
       statePath: value.statePath,
       reportPath: value.reportPath,
       rescueSummaryPath: value.rescueSummaryPath,
+      activityCensusPath: value.activityCensusPath,
       nowMs: 1_800_000_100_000,
       maxAgeMs: 200_000,
     });
@@ -101,6 +132,7 @@ test("fails closed on non-exact, inactive, zero-fill, reordered, or tampered coh
         statePath: value.statePath,
         reportPath: value.reportPath,
         rescueSummaryPath: value.rescueSummaryPath,
+        activityCensusPath: value.activityCensusPath,
         nowMs: 1_800_000_100_000,
         maxAgeMs: 200_000,
       }));

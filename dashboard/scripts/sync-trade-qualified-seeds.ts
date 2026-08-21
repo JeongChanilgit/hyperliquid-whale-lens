@@ -10,19 +10,24 @@ const projectRoot = resolve(dashboardRoot, "..");
 const statePath = resolve(projectRoot, "state/perp-twr-trade-qualified/latest_active_top10.json");
 const reportPath = resolve(projectRoot, "reports/perp-twr-trade-qualified/latest.json");
 const rescueSummaryPath = resolve(projectRoot, "reports/perp-twr-rescue/latest-summary.json");
+const activityCensusPath = resolve(projectRoot, "reports/perp-twr-activity-census/latest.json");
 const outputPath = resolve(dashboardRoot, "app/seed-wallets.ts");
 const cohort = loadTradeQualifiedTop10({
   statePath,
   reportPath,
   rescueSummaryPath,
+  activityCensusPath,
   maxAgeMs: 7 * 86_400_000,
 });
 const rescue = JSON.parse(readFileSync(rescueSummaryPath, "utf8")) as Row;
+const census = JSON.parse(readFileSync(activityCensusPath, "utf8")) as Row;
 if (!Array.isArray(rescue.accounts)) throw new Error("Rescue summary has no account registry");
+if (!Array.isArray(census.accounts) || census.run_status !== "COMPLETE") throw new Error("Activity census is not complete");
+const fillPositive = new Set((census.accounts as Row[]).filter((row) => row.status === "HAS_FILL").map((row) => String(row.wallet).toLowerCase()));
 
 const activeAddresses = new Set(cohort.wallets.map((row) => row.address));
 const candidates = (rescue.accounts as Row[])
-  .filter((row) => row.data_quality_status === "VERIFIED_EXACT" && Number(row.raw_fill_count_30d) >= 1)
+  .filter((row) => ["VERIFIED_EXACT", "VERIFIED_INTERVAL", "VERIFIED_INTERVAL_WITH_GUARD", "VERIFIED_BLOCK_RECONCILED", "VERIFIED_DERIVED_VALUE"].includes(String(row.data_quality_status)) && fillPositive.has(String(row.wallet).toLowerCase()))
   .map((row) => {
     const scores = row.latest_scores && typeof row.latest_scores === "object" ? row.latest_scores as Row : {};
     return { address: String(row.wallet).toLowerCase(), twr30d: Number(scores.exact_twr) };
@@ -50,7 +55,7 @@ const source = `export type SeedWallet = {
   status: "ACTIVE" | "PASS";
 };
 
-// ACTIVE: hash-linked simulation-only exact-TWR cohort with at least one raw 30D fill.
+// ACTIVE: hash-linked simulation-only exact-TWR cohort with at least one proven 30D fill.
 // PASS: exact-TWR evidence/watchlist rows retained for trading analysis only.
 // Run \`npm run data:sync-trade-qualified\` after regenerating account-preservation rescue evidence.
 export const SEED_WALLETS: SeedWallet[] = [
@@ -61,4 +66,4 @@ ${rows.map((row, index) => {
 ];
 `;
 writeFileSync(outputPath, source, "utf8");
-console.log(`Wrote ${rows.length} exact-TWR trade-qualified seeds to ${outputPath}`);
+console.log(`Wrote ${rows.length} exact-TWR fill-qualified seeds to ${outputPath}`);

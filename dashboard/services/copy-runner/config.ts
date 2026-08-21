@@ -60,6 +60,7 @@ const DEFAULT_CANDIDATE_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-candida
 const DEFAULT_TRADE_STATE = resolve(PROJECT_ROOT, "state/perp-twr-trade-qualified/latest_active_top10.json");
 const DEFAULT_TRADE_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-trade-qualified/latest.json");
 const DEFAULT_RESCUE_SUMMARY = resolve(PROJECT_ROOT, "reports/perp-twr-rescue/latest-summary.json");
+const DEFAULT_ACTIVITY_CENSUS = resolve(PROJECT_ROOT, "reports/perp-twr-activity-census/latest.json");
 
 const parseWhales = (raw: string): WhaleConfig[] => {
   let decoded: unknown;
@@ -109,6 +110,7 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
       statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_TRADE_STATE),
       reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_TRADE_REPORT),
       rescueSummaryPath: resolve(env.COPY_RUNNER_RESCUE_SUMMARY?.trim() || DEFAULT_RESCUE_SUMMARY),
+      activityCensusPath: resolve(env.COPY_RUNNER_ACTIVITY_CENSUS?.trim() || DEFAULT_ACTIVITY_CENSUS),
       maxAgeMs: maxCanonicalAgeMs,
     })
     : loadCanonicalTop10({

@@ -1,7 +1,7 @@
 # Hyperliquid Whale Lens 최종 개발 에이전트 제출 명세
 
-**대상 저장소:** `JeongChanilgit/hyperliquid-whale-lens`
-**제출본 버전:** 2026-08-21 Final
+**대상 저장소:** `JeongChanilgit/hyperliquid-whale-lens`  
+**제출본 버전:** 2026-08-21 Final  
 **목적:** 최근 30일 동안 입출금으로 부풀려지지 않은 perpetual 포지션 운용 복리수익률을 계산하고, 활동성이 충분한 고래 10명을 비용 제한 안에서 선정하도록 스크리너·보고서·상태 파일·모의투자 연동을 개편한다.
 
 ---

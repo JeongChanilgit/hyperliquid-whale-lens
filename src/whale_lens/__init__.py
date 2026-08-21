@@ -6,6 +6,7 @@ them without silently converting missing data into a return.
 """
 
 from .ledger import classify_non_funding_delta, dedupe_ledger_events
+from .activity_census import build_activity_census_report, select_exact_twr_top10_with_fills
 from .models import (
     CashFlowClassification,
     CashFlowEvent,
@@ -34,6 +35,7 @@ __all__ = [
     "EvidenceRegistry",
     "SelectionStatus",
     "build_rescue_report",
+    "build_activity_census_report",
     "calculate_interval_rescue",
     "calculate_provisional_perp_twr",
     "calculate_verified_perp_twr",
@@ -43,4 +45,5 @@ __all__ = [
     "reconcile_blocks",
     "recover_flow_value",
     "select_trade_qualified_top10",
+    "select_exact_twr_top10_with_fills",
 ]

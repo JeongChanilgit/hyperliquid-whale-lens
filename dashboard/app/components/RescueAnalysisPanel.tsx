@@ -18,6 +18,7 @@ type RescueAccount = {
   };
   account_value_usd: string | null;
   raw_fill_count_30d: number;
+  raw_fill_count_is_lower_bound?: boolean;
   completed_episodes_30d: number | null;
   rescue_priority_score: string;
   next_actions?: string[];
@@ -28,6 +29,12 @@ type RescuePayload = {
   discovered_accounts: number;
   quality_counts: Record<string, number>;
   rescue_queue_count: number;
+  activity_census?: {
+    run_status: string;
+    scanned_account_count: number;
+    has_fill_account_count: number;
+    zero_fill_account_count: number;
+  };
   accounts: RescueAccount[];
 };
 
@@ -98,6 +105,8 @@ export default function RescueAnalysisPanel() {
         <div><span>추정·상하한</span><strong>{boundedCount.toLocaleString()}</strong></div>
         <div><span>미해결</span><strong>{unresolvedCount.toLocaleString()}</strong></div>
         <div><span>구제 큐</span><strong>{payload.rescue_queue_count.toLocaleString()}</strong></div>
+        <div><span>활동 전수검증</span><strong>{payload.activity_census?.scanned_account_count.toLocaleString() ?? "—"}</strong></div>
+        <div><span>30일 체결 있음</span><strong>{payload.activity_census?.has_fill_account_count.toLocaleString() ?? "—"}</strong></div>
       </div>
       <div className="rescue-controls">
         <div className="rescue-tabs" role="tablist">
@@ -111,7 +120,7 @@ export default function RescueAnalysisPanel() {
         <div className="rescue-row rescue-row--head" role="row"><span>계좌</span><span>품질 / 활동</span><span>수익률</span><span>범위</span><span>증거·다음 작업</span></div>
         {rows.slice(0, limit).map((row) => (
           <div className="rescue-row" role="row" key={row.wallet}>
-            <span><strong>{short(row.wallet)}</strong><small>{usd(row.account_value_usd)} · fills {row.raw_fill_count_30d.toLocaleString()}</small></span>
+            <span><strong>{short(row.wallet)}</strong><small>{usd(row.account_value_usd)} · fills {row.raw_fill_count_is_lower_bound ? "≥" : ""}{row.raw_fill_count_30d.toLocaleString()}</small></span>
             <span><i className={`rescue-quality rescue-quality--${row.data_quality_status.toLowerCase()}`}>{row.data_quality_status}</i><small>{row.activity_status}</small></span>
             <span><strong>{pct(row.latest_scores.exact_twr ?? row.latest_scores.estimated_twr ?? row.latest_scores.provisional_twr)}</strong><small>{row.latest_scores.exact_twr ? "exact" : row.latest_scores.estimated_twr ? "estimate" : "provisional"}</small></span>
             <span><strong>{pct(row.latest_scores.twr_lower_bound)} → {pct(row.latest_scores.twr_upper_bound)}</strong><small>priority {Number(row.rescue_priority_score).toFixed(3)}</small></span>

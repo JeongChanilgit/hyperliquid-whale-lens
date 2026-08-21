@@ -24,9 +24,11 @@
   - `candidate.py`, `episodes.py`, `report.py`: 2,500+500 verification state machine, TOP2000 freeze/hash, raw-fill episodes, atomic report/canonical gates.
   - `research.py`: explicit-user-authorization path that converts an insufficient-candidate PARTIAL run into hash-linked, SIMULATION-only TOP10/TOP50 research artifacts without writing canonical state.
   - `activity_analysis.py`: pure selection, 90-day raw-fill episode, and current all-DEX position summary helpers for activity-qualified TWR research.
+  - `activity_census.py`: fail-closed whole-preserved-set fill-presence census, terminal coverage accounting, and exact-TWR TOP10 selection.
   - `pipeline.py`: fixed-window five-stage orchestration and persisted output wiring.
   - `evidence_registry.py`, `interval_twr.py`, `reconciliation.py`, `valuation.py`, `rescue.py`: append-only account evidence, interval timing rescue, bounded block reconciliation, provenance-preserving cash-flow valuation, exact/watchlist separation, audits, and rescue queue construction.
 - `src/run_account_preservation_rescue.py`: regenerate full/compact rescue reports and the hash-linked, simulation-only exact-TWR TOP10 with at least one raw 30D fill.
+- `src/scan_preserved_account_activity.py`: resume-safe fixed-window activity census; reuses positive official month-volume proof, raw-checks zero-volume accounts, and writes a replacement cohort only after all preserved accounts are terminal.
 - `src/analyze_filled_twr_top10_90d.py`: bounded public-data CLI that saves the TWR-ordered, recent-fill TOP10 90-day activity report without changing canonical or runner state.
 - `tests/test_*.py`: unit and integration coverage for cash flows, TWR examples, discovery, resume/cache, candidate boundary probes, raw episodes, and complete canonical publication.
 - `docs/workflows/daily-whale-screen.md`: bounded workflow for a daily screening cycle.
@@ -34,10 +36,12 @@
 - `reports/perp-twr-candidates/`: immutable run TOP2000 snapshots and complete `latest-top2000.json`.
 - `reports/perp-twr-research/`: compact partial-research TOP50/finalist artifacts; never canonical or live-trading input.
 - `reports/perp-twr-activity-90d/`: timestamped and latest activity-qualified TOP10 summaries; derived research only, never runner input.
+- `reports/perp-twr-activity-census/`: fixed-window terminal activity result for every preserved account, hash-linked into the simulation-only trade-qualified cohort.
 - `reports/perp-twr-rescue/`: full local evidence report plus compact summary and Markdown; the full JSON is intentionally not dashboard or GitHub payload.
 - `reports/perp-twr-trade-qualified/`: hash-linked exact-TWR, raw-fill-qualified research TOP10; SIMULATION-only.
 - `state/account-evidence-registry/`: append-only account histories, content-addressed raw references, immutable run manifests, and deterministic rescue queue.
 - `state/perp-twr-trade-qualified/`: SIMULATION-only TOP10 state for the explicit one-or-more-30D-fill research run.
+- `state/perp-twr-activity-census/`: atomic resume checkpoint for the all-preserved-account activity census.
 - `state/perp-twr-top10/`: hash-linked canonical ACTIVE TOP10, replaced only by a complete run.
 - `state/perp-twr-research/`: explicitly authorized SIMULATION-only TOP10 selection state.
 - `state/perp-twr-runs/`, `state/perp-twr-cache/`, `state/perp-twr-discovery/`: checkpoints, recalculable raw/normalized cache, and rotating discovery-cycle state.
@@ -51,7 +55,7 @@ Build and test entrypoints:
 - Dashboard dev: run `npm run dev` from `dashboard/`.
 - Dashboard checks: run `npm run lint`, `npm run build`, and the focused Node tests from `dashboard/`.
 - Dashboard canonical sync: after a complete hash-verified run, run `npm run data:sync-canonical` from `dashboard/` to regenerate the ACTIVE TOP10 plus 40 standby seeds.
-- Rescue/dashboard sync: run `python src/run_account_preservation_rescue.py --source-report <run.json>` then `npm run data:sync-rescue` and `npm run data:sync-trade-qualified`.
+- Rescue/dashboard sync: run `python src/run_account_preservation_rescue.py --source-report <run.json>`, then `python src/scan_preserved_account_activity.py --source-report <run.json>`, then `npm run data:sync-rescue` and `npm run data:sync-trade-qualified`.
 - Trade-qualified local paper run: use `powershell -File scripts/Local-CopyRunner.ps1 -Action Start -AllowTradeQualifiedResearch` from `dashboard/`; live execution is rejected for this cohort.
 - Dashboard preload: after canonical sync, run `npm run data:prefetch` from `dashboard/`.
 - Copy runner: run `npm run copy-runner` from `dashboard/`; its server-only environment and persistent database are documented in `dashboard/services/copy-runner/README.md`.

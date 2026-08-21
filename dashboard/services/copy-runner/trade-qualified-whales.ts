@@ -4,11 +4,19 @@ import type { CanonicalTop10, CanonicalWhale } from "./canonical-whales";
 
 const ADDRESS = /^0x[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+const EXACT_QUALITIES = new Set([
+  "VERIFIED_EXACT",
+  "VERIFIED_INTERVAL",
+  "VERIFIED_INTERVAL_WITH_GUARD",
+  "VERIFIED_BLOCK_RECONCILED",
+  "VERIFIED_DERIVED_VALUE",
+]);
 
 export interface TradeQualifiedTop10Options {
   statePath: string;
   reportPath: string;
   rescueSummaryPath: string;
+  activityCensusPath: string;
   nowMs?: number;
   maxAgeMs: number;
 }
@@ -44,6 +52,38 @@ const decimal = (value: unknown, label: string): number => {
   return result;
 };
 
+type ExactDecimal = { sign: -1 | 0 | 1; coefficient: bigint; scale: number };
+const exactDecimal = (value: unknown, label: string): ExactDecimal => {
+  const raw = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  const match = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(raw);
+  if (!match) throw new Error(`${label} must be an exact decimal`);
+  const integerPart = match[2] ?? "";
+  const fractionPart = match[3] ?? match[4] ?? "";
+  const exponent = Number(match[5] ?? "0");
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 10_000) throw new Error(`${label} exponent is out of range`);
+  const digits = `${integerPart}${fractionPart}`.replace(/^0+/, "") || "0";
+  if (digits === "0") return { sign: 0, coefficient: BigInt(0), scale: 0 };
+  return {
+    sign: match[1] === "-" ? -1 : 1,
+    coefficient: BigInt(digits),
+    scale: exponent - fractionPart.length,
+  };
+};
+const compareExactDecimals = (left: unknown, right: unknown, label = "decimal"): number => {
+  const a = exactDecimal(left, label);
+  const b = exactDecimal(right, label);
+  if (a.sign !== b.sign) return a.sign < b.sign ? -1 : 1;
+  if (a.sign === 0) return 0;
+  const commonScale = Math.min(a.scale, b.scale);
+  const alignedA = a.coefficient * (BigInt(10) ** BigInt(a.scale - commonScale));
+  const alignedB = b.coefficient * (BigInt(10) ** BigInt(b.scale - commonScale));
+  const magnitude = alignedA === alignedB ? 0 : alignedA < alignedB ? -1 : 1;
+  return a.sign === 1 ? magnitude : -magnitude;
+};
+const validExactDecimal = (value: unknown): string | null => {
+  try { exactDecimal(value, "TWR"); return String(value).trim(); } catch { return null; }
+};
+
 const canonicalJson = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -67,8 +107,13 @@ export const loadTradeQualifiedTop10 = (options: TradeQualifiedTop10Options): Ca
   if (state.selection_type !== "TRADE_QUALIFIED_TWR_RESEARCH" || state.simulation_only !== true) {
     throw new Error("trade-qualified cohort must be explicitly simulation-only");
   }
-  if (Number(state.minimum_raw_fills_30d) !== 1 || state.minimum_completed_episodes !== null) {
-    throw new Error("trade-qualified cohort must require one raw 30D fill and no completed-episode threshold");
+  if (Number(state.minimum_raw_fills_30d) !== 1 || Number(state.minimum_proven_fills_30d) !== 1
+      || state.activity_evidence_scope !== "OFFICIAL_PERP_MONTH_VOLUME_OR_UNAGGREGATED_DEFAULT_DEX_FILLS"
+      || state.minimum_completed_episodes !== null) {
+    throw new Error("trade-qualified cohort must require one proven 30D fill and no completed-episode threshold");
+  }
+  if (state.selection_basis !== "FULL_PRESERVED_ACCOUNT_ACTIVITY_CENSUS_EXACT_TWR" || state.activity_census_complete !== true) {
+    throw new Error("trade-qualified cohort must come from a complete preserved-account activity census");
   }
 
   const cohortHash = text(state.cohort_sha256, "trade-qualified cohort_sha256").toLowerCase();
@@ -87,6 +132,26 @@ export const loadTradeQualifiedTop10 = (options: TradeQualifiedTop10Options): Ca
   if (text(rescueSummary.full_report_canonical_sha256, "rescue full_report_canonical_sha256").toLowerCase() !== rescueReportHash) {
     throw new Error("trade-qualified cohort does not match the full rescue report digest");
   }
+  const census = readJson(options.activityCensusPath, "preserved-account activity census");
+  const censusHash = text(state.activity_census_report_sha256, "trade-qualified activity_census_report_sha256").toLowerCase();
+  if (!SHA256.test(censusHash) || hashValue(census) !== censusHash) {
+    throw new Error("trade-qualified cohort does not match the activity census");
+  }
+  if (census.run_status !== "COMPLETE" || census.coverage_complete !== true) {
+    throw new Error("activity census is not complete");
+  }
+  const preservedCount = integer(census.preserved_account_count, "activity census preserved_account_count");
+  const scannedCount = integer(census.scanned_account_count, "activity census scanned_account_count");
+  if (preservedCount !== scannedCount || Number(state.activity_census_preserved_account_count) !== preservedCount || Number(state.activity_census_scanned_account_count) !== scannedCount) {
+    throw new Error("activity census does not cover every preserved account");
+  }
+  if (text(state.activity_census_account_set_hash, "trade-qualified activity_census_account_set_hash").toLowerCase()
+      !== text(census.account_set_hash, "activity census account_set_hash").toLowerCase()) {
+    throw new Error("trade-qualified cohort and activity census account sets differ");
+  }
+  if (text(census.source_rescue_summary_sha256, "activity census source_rescue_summary_sha256").toLowerCase() !== summaryHash) {
+    throw new Error("activity census does not match the rescue summary");
+  }
 
   const runId = text(state.source_run_id, "trade-qualified source_run_id");
   if (text(rescueSummary.source_run_id, "rescue source_run_id") !== runId) {
@@ -100,7 +165,8 @@ export const loadTradeQualifiedTop10 = (options: TradeQualifiedTop10Options): Ca
   if (!Array.isArray(state.wallets) || state.wallets.length !== 10) {
     throw new Error("trade-qualified cohort must contain exactly 10 wallets");
   }
-  let previousTwr = Number.POSITIVE_INFINITY;
+  let previousTwr: string | null = null;
+  const walletTwrTexts: string[] = [];
   const wallets: CanonicalWhale[] = state.wallets.map((value, index) => {
     const row = object(value, `trade-qualified wallets[${index}]`);
     const address = text(row.address ?? row.wallet, `trade-qualified wallets[${index}].address`).toLowerCase();
@@ -110,15 +176,20 @@ export const loadTradeQualifiedTop10 = (options: TradeQualifiedTop10Options): Ca
     if (text(row.status, `trade-qualified wallets[${index}].status`).toUpperCase() !== "ACTIVE") {
       throw new Error("trade-qualified TOP 10 may contain only ACTIVE wallets");
     }
-    if (row.data_quality_status !== "VERIFIED_EXACT") {
+    if (!EXACT_QUALITIES.has(String(row.data_quality_status))) {
       throw new Error("trade-qualified TOP 10 may use only exact verified TWR accounts");
     }
     if (integer(row.raw_fill_count_30d, `trade-qualified wallets[${index}].raw_fill_count_30d`) < 1) {
       throw new Error("trade-qualified TOP 10 requires at least one raw 30D fill");
     }
-    const twr30d = decimal(row.perp_cashflow_neutral_twr_30d, `trade-qualified wallets[${index}].twr`);
-    if (twr30d > previousTwr) throw new Error("trade-qualified wallets are not sorted by descending TWR");
-    previousTwr = twr30d;
+    const twrText = validExactDecimal(row.perp_cashflow_neutral_twr_30d);
+    if (twrText === null) throw new Error(`trade-qualified wallets[${index}].twr must be an exact decimal`);
+    const twr30d = decimal(twrText, `trade-qualified wallets[${index}].twr`);
+    if (previousTwr !== null && compareExactDecimals(twrText, previousTwr, "trade-qualified TWR") > 0) {
+      throw new Error("trade-qualified wallets are not sorted by descending TWR");
+    }
+    previousTwr = twrText;
+    walletTwrTexts.push(twrText);
     return {
       address,
       rank,
@@ -130,6 +201,48 @@ export const loadTradeQualifiedTop10 = (options: TradeQualifiedTop10Options): Ca
   const walletHash = text(state.wallet_order_hash, "trade-qualified wallet_order_hash").toLowerCase();
   if (!SHA256.test(walletHash) || hashValue(wallets.map((wallet) => wallet.address)) !== walletHash) {
     throw new Error("trade-qualified wallet_order_hash does not match the ordered cohort");
+  }
+
+  if (!Array.isArray(rescueSummary.accounts) || !Array.isArray(census.accounts)) {
+    throw new Error("rescue summary and activity census must include account rows");
+  }
+  const censusByWallet = new Map<string, Record<string, unknown>>();
+  for (const value of census.accounts) {
+    const row = object(value, "activity census account");
+    const wallet = text(row.wallet, "activity census wallet").toLowerCase();
+    if (!ADDRESS.test(wallet) || censusByWallet.has(wallet)) throw new Error("activity census contains an invalid or duplicate wallet");
+    if (row.status !== "HAS_FILL" && row.status !== "ZERO_FILLS") throw new Error("complete activity census contains a non-terminal account");
+    censusByWallet.set(wallet, row);
+  }
+  if (censusByWallet.size !== preservedCount) throw new Error("activity census row count does not match preserved_account_count");
+  const expectedTop10 = (rescueSummary.accounts as unknown[])
+    .map((value) => object(value, "rescue account"))
+    .map((row) => {
+      const wallet = text(row.wallet, "rescue account wallet").toLowerCase();
+      const scores = row.latest_scores && typeof row.latest_scores === "object" && !Array.isArray(row.latest_scores)
+        ? row.latest_scores as Record<string, unknown>
+        : {};
+      return { wallet, quality: String(row.data_quality_status), twr: validExactDecimal(scores.exact_twr) };
+    })
+    .filter((row) => ADDRESS.test(row.wallet) && EXACT_QUALITIES.has(row.quality)
+      && row.twr !== null && censusByWallet.get(row.wallet)?.status === "HAS_FILL")
+    .sort((left, right) => {
+      const scoreOrder = compareExactDecimals(left.twr, right.twr, "rescue exact TWR");
+      return scoreOrder === 0 ? left.wallet.localeCompare(right.wallet) : -scoreOrder;
+    })
+    .slice(0, 10);
+  if (expectedTop10.length !== 10
+      || JSON.stringify(expectedTop10.map((row) => row.wallet)) !== JSON.stringify(wallets.map((row) => row.address))) {
+    throw new Error("trade-qualified wallets are not the global exact-TWR TOP 10 among fill-positive preserved accounts");
+  }
+  if (expectedTop10.some((row, index) => compareExactDecimals(row.twr, walletTwrTexts[index], "TOP10 TWR") !== 0)) {
+    throw new Error("trade-qualified TOP 10 scores differ from the rescue registry");
+  }
+  for (let index = 0; index < wallets.length; index += 1) {
+    const evidence = censusByWallet.get(wallets[index]!.address);
+    if (!evidence || evidence.status !== "HAS_FILL" || integer(evidence.minimum_proven_fill_count_30d, `activity census TOP10[${index}].minimum proven fills`) < 1) {
+      throw new Error("trade-qualified TOP 10 is missing positive fill evidence");
+    }
   }
 
   const configHash = text(state.source_config_hash, "trade-qualified source_config_hash").toLowerCase();
