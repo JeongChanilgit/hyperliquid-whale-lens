@@ -6,8 +6,13 @@ type Row = Record<string, unknown>;
 
 const dashboardRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const projectRoot = resolve(dashboardRoot, "..");
-const canonicalPath = resolve(projectRoot, "state/perp-twr-top10/latest_active_top10.json");
-const candidatesPath = resolve(projectRoot, "reports/perp-twr-candidates/latest-top2000.json");
+const researchOverride = process.env.WHALE_LENS_RESEARCH_OVERRIDE === "true";
+const canonicalPath = resolve(projectRoot, researchOverride
+  ? "state/perp-twr-research/latest_active_top10.json"
+  : "state/perp-twr-top10/latest_active_top10.json");
+const candidatesPath = resolve(projectRoot, researchOverride
+  ? "reports/perp-twr-research/latest-candidates.json"
+  : "reports/perp-twr-candidates/latest-top2000.json");
 const outputPath = resolve(dashboardRoot, "app/seed-wallets.ts");
 const addressPattern = /^0x[a-f0-9]{40}$/;
 
@@ -27,6 +32,15 @@ const twrPercent = (row: unknown): number => {
 
 const canonical = json(canonicalPath);
 const candidates = json(candidatesPath);
+if (researchOverride) {
+  if (canonical.selection_mode !== "VERIFIED_PARTIAL_RESEARCH" || canonical.research_override_authorized !== true
+      || canonical.canonical_state_updated !== false || canonical.run_status !== "PARTIAL_RESEARCH_OVERRIDE") {
+    throw new Error("Research seed sync requires an explicitly authorized partial-research state");
+  }
+  if (candidates.selection_mode !== "VERIFIED_PARTIAL_RESEARCH" || candidates.candidate_pool_complete !== false) {
+    throw new Error("Research seed sync requires the compact partial-research candidate artifact");
+  }
+}
 if (canonical.run_id !== candidates.run_id || canonical.candidate_pool_hash !== candidates.candidate_pool_hash) {
   throw new Error("Canonical TOP10 and candidate TOP2000 do not share the same run/hash");
 }
@@ -62,12 +76,12 @@ const source = `export type SeedWallet = {
   status: "ACTIVE" | "PASS";
 };
 
-// Generated from the hash-linked canonical TOP10 and VERIFIED TOP2000.
-// Run \`npm run data:sync-canonical\` after a complete screener cycle.
+// Generated from the hash-linked ${researchOverride ? "simulation-only partial research TOP10 and VERIFIED TOP50" : "canonical TOP10 and VERIFIED TOP2000"}.
+// Run \`${researchOverride ? "npm run data:sync-research" : "npm run data:sync-canonical"}\` after the matching screening decision.
 export const SEED_WALLETS: SeedWallet[] = [
 ${rows.map((row, index) => {
   const rank = index + 1;
-  const label = `Perp TWR ${String(rank).padStart(2, "0")}`;
+  const label = `${researchOverride ? "Research TWR" : "Perp TWR"} ${String(rank).padStart(2, "0")}`;
   const status = rank <= 10 ? "ACTIVE" : "PASS";
   return `  { address: "${address(row)}", label: "${label}", screenedReturnPct: ${twrPercent(row).toFixed(8)}, status: "${status}" },`;
 }).join("\n")}
@@ -75,4 +89,4 @@ ${rows.map((row, index) => {
 `;
 
 writeFileSync(outputPath, source, "utf8");
-console.log(`Wrote ${rows.length} verified seeds to ${outputPath}`);
+console.log(`Wrote ${rows.length} ${researchOverride ? "research" : "canonical"} verified seeds to ${outputPath}`);

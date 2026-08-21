@@ -31,6 +31,8 @@ const config = (mode: "SIMULATION" | "HYPERLIQUID"): CopyRunnerConfig => ({
     rankingScope: "DISCOVERY_POOL_EXACT",
     configHash: "a".repeat(64),
     candidatePoolHash: "b".repeat(64),
+    selectionMode: "CANONICAL",
+    researchOverride: false,
   },
 });
 

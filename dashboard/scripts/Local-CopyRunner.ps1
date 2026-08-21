@@ -13,6 +13,7 @@ param(
   [ValidateSet('REPLAY_OPEN_EPISODES', 'NEW_POSITIONS_ONLY', 'INCLUDE_EXISTING')]
   [string]$EntryPolicy = 'REPLAY_OPEN_EPISODES',
   [string]$AllowedSymbols = '*',
+  [switch]$AllowPartialResearch,
   [int]$RunnerPort = 8788,
   [int]$SitePort = 3000
 )
@@ -20,9 +21,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $dashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $projectRoot = (Resolve-Path (Join-Path $dashboardRoot '..')).Path
-$canonicalStatePath = Join-Path $projectRoot 'state\perp-twr-top10\latest_active_top10.json'
-$canonicalReportPath = Join-Path $projectRoot 'reports\perp-twr-discovery\latest.json'
-$canonicalCandidatesPath = Join-Path $projectRoot 'reports\perp-twr-candidates\latest-top2000.json'
+$canonicalStatePath = if ($AllowPartialResearch) {
+  Join-Path $projectRoot 'state\perp-twr-research\latest_active_top10.json'
+} else { Join-Path $projectRoot 'state\perp-twr-top10\latest_active_top10.json' }
+$canonicalReportPath = if ($AllowPartialResearch) {
+  Join-Path $projectRoot 'reports\perp-twr-research\latest.json'
+} else { Join-Path $projectRoot 'reports\perp-twr-discovery\latest.json' }
+$canonicalCandidatesPath = if ($AllowPartialResearch) {
+  Join-Path $projectRoot 'reports\perp-twr-research\latest-candidates.json'
+} else { Join-Path $projectRoot 'reports\perp-twr-candidates\latest-top2000.json' }
 $stateRoot = Join-Path $env:LOCALAPPDATA 'WhaleLens'
 $statePath = Join-Path $stateRoot 'local-copy-state.json'
 $localSimulationToken = 'whale-lens-local-simulation-only-v1'
@@ -30,7 +37,7 @@ $localSimulationToken = 'whale-lens-local-simulation-only-v1'
 function Assert-CanonicalPaperStart {
   if ($Action -ne 'Start') { return }
   if ($WhaleAddress.Count -ne 0) {
-    throw 'Local paper start always uses the verified canonical TOP 10; WhaleAddress overrides are not allowed.'
+    throw 'Local paper start always uses the hash-linked selected TOP 10; WhaleAddress overrides are not allowed.'
   }
   if ($CopyRatio -ne 0.01) {
     throw 'Local paper start uses the fixed canonical copy ratio of 0.01.'
@@ -187,7 +194,8 @@ function Start-LocalStack {
   $sessionEndsAtMs = $sessionStartedAtMs + ([int64]$SessionDays * 86400000)
   $sessionStamp = [DateTimeOffset]::FromUnixTimeMilliseconds($sessionStartedAtMs).UtcDateTime.ToString('yyyyMMddTHHmmssfffZ')
   $sessionNonce = [guid]::NewGuid().ToString('N')
-  $sessionDatabase = Join-Path $dashboardRoot "data\sessions\paper-$sessionStamp-$sessionNonce-top10-${SessionDays}d.sqlite"
+  $selectionSuffix = if ($AllowPartialResearch) { 'research-top10' } else { 'canonical-top10' }
+  $sessionDatabase = Join-Path $dashboardRoot "data\sessions\paper-$sessionStamp-$sessionNonce-$selectionSuffix-${SessionDays}d.sqlite"
   if (Test-Path -LiteralPath $sessionDatabase) {
     throw "Refusing to reuse an existing paper-session database: $sessionDatabase"
   }
@@ -207,6 +215,7 @@ function Start-LocalStack {
     COPY_RUNNER_CANONICAL_STATE = $canonicalStatePath
     COPY_RUNNER_CANONICAL_REPORT = $canonicalReportPath
     COPY_RUNNER_CANONICAL_CANDIDATES = $canonicalCandidatesPath
+    COPY_RUNNER_ALLOW_PARTIAL_RESEARCH = $(if ($AllowPartialResearch) { 'true' } else { 'false' })
     HYPERLIQUID_ENABLED = 'false'
     HYPERLIQUID_TESTNET = 'true'
     HYPERLIQUID_AGENT_PRIVATE_KEY = ''
@@ -306,6 +315,8 @@ function Show-LocalStatus {
         executionEnabled = $status.executionEnabled
         testnet = $status.testnet
         databasePath = $status.databasePath
+        selectionMode = $status.canonical.selectionMode
+        researchOverride = $status.canonical.researchOverride
         siteUrl = "http://localhost:$($state.SitePort)"
       } | ConvertTo-Json
     } catch { Write-Warning "Runner status request failed: $($_.Exception.Message)" }

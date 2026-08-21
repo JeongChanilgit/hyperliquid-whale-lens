@@ -19,6 +19,8 @@ export interface CanonicalTop10 {
   configHash: string;
   candidatePoolHash: string;
   reportSha256: string;
+  selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH";
+  researchOverride: boolean;
   wallets: CanonicalWhale[];
 }
 
@@ -28,6 +30,7 @@ export interface CanonicalTop10Options {
   candidatePath: string;
   nowMs?: number;
   maxAgeMs: number;
+  allowPartialResearch?: boolean;
 }
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
@@ -109,7 +112,18 @@ export const loadCanonicalTop10 = (options: CanonicalTop10Options): CanonicalTop
   const nowMs = options.nowMs ?? Date.now();
   if (asOfMs > nowMs + 300_000) throw new Error("canonical as_of_ms is in the future");
   if (nowMs - asOfMs > options.maxAgeMs) throw new Error("canonical TOP 10 is stale; run the screener before autostart");
-  if (state.canonical_state_updated === false || state.run_status === "PARTIAL") {
+  const selectionMode = typeof state.selection_mode === "string" ? state.selection_mode.trim().toUpperCase() : "CANONICAL";
+  const researchOverride = selectionMode === "VERIFIED_PARTIAL_RESEARCH";
+  const incomplete = state.canonical_state_updated === false || state.run_status === "PARTIAL" || state.run_status === "PARTIAL_RESEARCH_OVERRIDE";
+  if (incomplete && !researchOverride) {
+    throw new Error("canonical TOP 10 was produced by an incomplete run");
+  }
+  if (researchOverride) {
+    if (!options.allowPartialResearch) throw new Error("partial research TOP 10 requires explicit simulation-only authorization");
+    if (state.run_status !== "PARTIAL_RESEARCH_OVERRIDE" || state.canonical_state_updated !== false || state.research_override_authorized !== true) {
+      throw new Error("partial research TOP 10 is missing its explicit authorization markers");
+    }
+  } else if (incomplete) {
     throw new Error("canonical TOP 10 was produced by an incomplete run");
   }
   const coverageMode = text(state.coverage_mode, "canonical coverage_mode");
@@ -134,12 +148,60 @@ export const loadCanonicalTop10 = (options: CanonicalTop10Options): CanonicalTop
   if (text(report.value.candidate_pool_hash, "report candidate_pool_hash").toLowerCase() !== candidatePoolHash) {
     throw new Error("canonical state and report candidate_pool_hash differ");
   }
+  if (researchOverride) {
+    if (report.value.selection_mode !== "VERIFIED_PARTIAL_RESEARCH" || report.value.run_status !== "PARTIAL_RESEARCH_OVERRIDE") {
+      throw new Error("partial research report has invalid selection markers");
+    }
+    if (report.value.research_override_authorized !== true || report.value.source_reason_code !== "INSUFFICIENT_VERIFIED_CANDIDATES") {
+      throw new Error("partial research report is not an authorized insufficient-candidate override");
+    }
+    if (report.value.outside_shard_coverage_complete !== true || Number(report.value.outside_pool_threshold_breach_count) !== 0) {
+      throw new Error("partial research report failed outside-pool safety checks");
+    }
+  }
 
   const candidate = json(options.candidatePath, "canonical candidate pool").value;
   if (text(candidate.run_id, "candidate run_id") !== runId) throw new Error("canonical state and candidate run_id differ");
   if (text(candidate.candidate_pool_hash, "candidate candidate_pool_hash").toLowerCase() !== candidatePoolHash) {
     throw new Error("canonical state and candidate file hash differ");
   }
+  if (researchOverride) {
+    if (candidate.selection_mode !== "VERIFIED_PARTIAL_RESEARCH" || candidate.candidate_pool_complete !== false) {
+      throw new Error("partial research candidate file has invalid selection markers");
+    }
+    const candidates = Array.isArray(candidate.candidates) ? candidate.candidates : [];
+    const finalistRows = Array.isArray(state.finalists) ? state.finalists.map((row, index) => object(row, `research finalist[${index}]`)) : [];
+    if (candidates.length < 10 || finalistRows.length !== 10) throw new Error("partial research artifacts require 10 finalists");
+    let previousCandidateRank = 0;
+    for (let index = 0; index < wallets.length; index += 1) {
+      const wallet = wallets[index];
+      const finalist = finalistRows[index];
+      const candidateRank = integer(finalist.candidate_rank, `research finalist[${index}].candidate_rank`);
+      const episodes = integer(finalist.completed_episodes, `research finalist[${index}].completed_episodes`);
+      if (candidateRank <= previousCandidateRank) throw new Error("research finalists must preserve candidate TWR order");
+      if (episodes < 10) throw new Error("research finalists must have at least 10 completed episodes");
+      previousCandidateRank = candidateRank;
+      const source = candidates.find((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+        const row = value as Record<string, unknown>;
+        return String(row.wallet ?? row.address ?? "").toLowerCase() === wallet.address;
+      });
+      const sourceRow = object(source, `research candidate for ${wallet.address}`);
+      if (text(sourceRow.quality, `research candidate ${wallet.address}.quality`) !== "VERIFIED") {
+        throw new Error("partial research finalists may use only VERIFIED candidates");
+      }
+      if (integer(sourceRow.candidate_rank, `research candidate ${wallet.address}.candidate_rank`) !== candidateRank) {
+        throw new Error("research finalist candidate rank does not match candidate artifact");
+      }
+      const sourceTwr = decimal(sourceRow.perp_cashflow_neutral_twr_30d, `research candidate ${wallet.address}.twr`);
+      if (Math.abs(sourceTwr - wallet.twr30d) > 1e-12) throw new Error("research finalist TWR does not match candidate artifact");
+    }
+  }
 
-  return { runId, asOfMs, coverageMode, rankingScope, configHash, candidatePoolHash, reportSha256, wallets };
+  return {
+    runId, asOfMs, coverageMode, rankingScope, configHash, candidatePoolHash, reportSha256,
+    selectionMode: researchOverride ? "VERIFIED_PARTIAL_RESEARCH" : "CANONICAL",
+    researchOverride,
+    wallets,
+  };
 };

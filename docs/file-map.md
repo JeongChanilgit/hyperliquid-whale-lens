@@ -21,12 +21,15 @@
   - `portfolio.py`, `ledger.py`, `twr.py`, `models.py`: `perpMonth` normalization, explicit non-funding cash-flow classification, Decimal TWR and reconciliation diagnostics.
     - Screening clips to one fixed run window and scores only real aligned observations inside it; it does not manufacture exact start/end samples.
   - `candidate.py`, `episodes.py`, `report.py`: 2,500+500 verification state machine, TOP2000 freeze/hash, raw-fill episodes, atomic report/canonical gates.
+  - `research.py`: explicit-user-authorization path that converts an insufficient-candidate PARTIAL run into hash-linked, SIMULATION-only TOP10/TOP50 research artifacts without writing canonical state.
   - `pipeline.py`: fixed-window five-stage orchestration and persisted output wiring.
 - `tests/test_*.py`: unit and integration coverage for cash flows, TWR examples, discovery, resume/cache, candidate boundary probes, raw episodes, and complete canonical publication.
 - `docs/workflows/daily-whale-screen.md`: bounded workflow for a daily screening cycle.
 - `reports/perp-twr-discovery/`: timestamped and latest run JSON/Markdown reports.
 - `reports/perp-twr-candidates/`: immutable run TOP2000 snapshots and complete `latest-top2000.json`.
+- `reports/perp-twr-research/`: compact partial-research TOP50/finalist artifacts; never canonical or live-trading input.
 - `state/perp-twr-top10/`: hash-linked canonical ACTIVE TOP10, replaced only by a complete run.
+- `state/perp-twr-research/`: explicitly authorized SIMULATION-only TOP10 selection state.
 - `state/perp-twr-runs/`, `state/perp-twr-cache/`, `state/perp-twr-discovery/`: checkpoints, recalculable raw/normalized cache, and rotating discovery-cycle state.
 - `AGENTS.md`, `CLAUDE.md`: synchronized project instructions.
 

@@ -16,6 +16,9 @@
 5. Publish only complete local state.
    - Allowed reads: `reports/perp-twr-discovery/`, `reports/perp-twr-candidates/`, `state/perp-twr-top10/`, `dashboard/scripts/sync-canonical-seeds.ts`, `dashboard/services/copy-runner/canonical-whales.ts`, `dashboard/services/copy-runner/config.ts`.
    - Verify config/candidate/report hashes and exact runner wallet order. On success, run `npm run data:sync-canonical` before `npm run data:prefetch`; then start the bounded SIMULATION session. A partial run may write timestamped diagnostics/checkpoints but must not replace canonical TOP10 or restart the runner.
+6. Handle an explicitly authorized partial-research exception.
+   - Allowed reads: `src/whale_lens/research.py`, one PARTIAL discovery report, its matching candidate run file, `reports/perp-twr-research/`, `state/perp-twr-research/`, `dashboard/scripts/sync-canonical-seeds.ts`, `dashboard/services/copy-runner/canonical-whales.ts`, `dashboard/services/copy-runner/config.ts`.
+   - Require `INSUFFICIENT_VERIFIED_CANDIDATES` as the sole source-run blocker, complete outside-shard coverage, zero outside-pool breach, strict VERIFIED candidates, and at least 10 completed raw-fill episodes. Write only research paths, run `npm run data:sync-research` and `npm run data:prefetch`, and start only with `COPY_RUNNER_ALLOW_PARTIAL_RESEARCH=true` in `SIMULATION`; never alter canonical state.
 
 Stop conditions:
 

@@ -52,9 +52,14 @@ logs/
 !/reports/perp-twr-candidates/
 !/reports/perp-twr-candidates/latest-top2000.json
 !/reports/perp-twr-candidates/run-perp-twr-*-top2000.json
+!/reports/perp-twr-research/
+!/reports/perp-twr-research/latest.json
+!/reports/perp-twr-research/latest-candidates.json
 /state/**
 !/state/perp-twr-top10/
 !/state/perp-twr-top10/latest_active_top10.json
+!/state/perp-twr-research/
+!/state/perp-twr-research/latest_active_top10.json
 
 # Local packaging/caches
 work/

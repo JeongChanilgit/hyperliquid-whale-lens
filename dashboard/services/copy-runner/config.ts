@@ -19,6 +19,8 @@ export interface CopyRunnerConfig {
     rankingScope: string;
     configHash: string;
     candidatePoolHash: string;
+    selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH";
+    researchOverride: boolean;
   };
   session?: {
     startedAtMs: number;
@@ -86,11 +88,16 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
   if (entryPolicy === "REPLAY_OPEN_EPISODES" && mode !== "SIMULATION") {
     throw new Error("COPY_RUNNER_ENTRY_POLICY=REPLAY_OPEN_EPISODES is supported only in SIMULATION mode");
   }
+  const allowPartialResearch = env.COPY_RUNNER_ALLOW_PARTIAL_RESEARCH === "true";
+  if (allowPartialResearch && mode !== "SIMULATION") {
+    throw new Error("COPY_RUNNER_ALLOW_PARTIAL_RESEARCH is supported only in SIMULATION mode");
+  }
   const canonical = loadCanonicalTop10({
     statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_CANONICAL_STATE),
     reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_DISCOVERY_REPORT),
     candidatePath: resolve(env.COPY_RUNNER_CANONICAL_CANDIDATES?.trim() || DEFAULT_CANDIDATE_REPORT),
     maxAgeMs: number(env, "COPY_RUNNER_CANONICAL_MAX_AGE_MS", 48 * 60 * 60 * 1_000, 60_000),
+    allowPartialResearch,
   });
   const canonicalWhales: WhaleConfig[] = canonical.wallets.map((wallet) => ({
     address: wallet.address,
@@ -163,6 +170,8 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
       rankingScope: canonical.rankingScope,
       configHash: canonical.configHash,
       candidatePoolHash: canonical.candidatePoolHash,
+      selectionMode: canonical.selectionMode,
+      researchOverride: canonical.researchOverride,
     },
     ...(sessionStartedAtMs !== undefined && sessionEndsAtMs !== undefined
       ? { session: { startedAtMs: sessionStartedAtMs, endsAtMs: sessionEndsAtMs } }

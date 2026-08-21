@@ -112,3 +112,12 @@ test("runner config rejects replaying open episodes in live Hyperliquid mode", (
     COPY_RUNNER_MODE: "HYPERLIQUID",
   }), /SIMULATION mode/);
 });
+
+test("runner config never permits the partial research gate in live mode", () => {
+  assert.throws(() => loadCopyRunnerConfig({
+    ...baseEnvironment(),
+    COPY_RUNNER_ENTRY_POLICY: "NEW_POSITIONS_ONLY",
+    COPY_RUNNER_MODE: "HYPERLIQUID",
+    COPY_RUNNER_ALLOW_PARTIAL_RESEARCH: "true",
+  }), /supported only in SIMULATION mode/);
+});
