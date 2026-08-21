@@ -49,15 +49,16 @@ This managed section is the base layer for project instructions. Project-specifi
 - Task units:
   - Daily whale screening: `docs/workflows/daily-whale-screen.md`.
   - Wallet trading dashboard: `docs/workflows/wallet-trading-dashboard.md`.
-- Screening rule: rank by the sampled cash-flow-neutral compounded 30D growth percentage, require at least 10 completed position episodes, and require MDD on the same compounded curve below 40%. Do not rank by leaderboard `month.roi` or absolute PnL.
+- Screening rule: rank only by ledger-verified `perp_cashflow_neutral_twr_30d`, freeze VERIFIED TOP2000, then require at least 10 completed raw-fill position episodes for ACTIVE TOP10. Leaderboard ROI/PnL/turnover are discovery signals; MDD is diagnostic only.
+- Fixed-window sample rule: use only real aligned `perpMonth` observations inside the run-wide fixed 30-day window; do not interpolate or relabel a nearby out-of-window observation as an exact boundary, and exclude wallets with fewer than two in-window observations.
 - Carry-in rule: paper/backtest startup positions use the source average entry price; never substitute the current mark, and skip positions whose entry cannot be verified.
 - Dashboard workflow scope: 30-day replay plus real-time paper/live copy monitoring; live signing remains server-only and risk-gated.
 - Dashboard file map now includes `app/components/`, `app/hooks/`, `app/lib/realtime/`, and `app/api/copy-engine/` ownership boundaries.
 - Hyperliquid live signing stays server-only in `dashboard/app/lib/realtime/hyperliquid-execution.ts` and `dashboard/services/copy-runner/hyperliquid_bridge.py`; never move target mappings or private keys into browser code.
-- Durable dashboard scope now includes login-free local audit, versioned TOP 50 preloads, and the standalone SQLite copy runner documented in the file map/workflow.
+- Durable dashboard scope includes login-free local audit, versioned preload data, hash-linked canonical TOP10/TOP2000 screening outputs, and the standalone SQLite copy runner documented in the file map/workflow.
+- Canonical runner rule: a new copy-runner session must load `state/perp-twr-top10/latest_active_top10.json` and cross-check the matching discovery report and TOP2000 hashes; stale or partial output must fail closed.
 - Local-first rule: run `npm run local:start` from `dashboard/`; publish, redeploy, or delete a Sites deployment only on explicit user request.
 - Workflow rule: each task-unit workflow must list step-level allowed read paths. During a step, read only those folders/files unless the workflow is updated first.
 - Cross-AI sync rule: when file map, task units, or workflow locations change, update both `AGENTS.md` and `CLAUDE.md` in the same turn.
-- Private plugin mirror: `.codex-plugin/plugin.json` and `skills/hyperliquid-whale-lens/SKILL.md` expose this repository to the user's personal Codex marketplace; the plugin does not authorize deployment or live trading.
 
 <!-- END PROJECT FILE MAP AND TASK WORKFLOWS -->

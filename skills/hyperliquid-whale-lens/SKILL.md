@@ -1,6 +1,6 @@
 ---
 name: hyperliquid-whale-lens
-description: Open, inspect, run, test, and maintain the private Hyperliquid Whale Lens workspace, including the 30-day whale screener, trading-analysis dashboard, TOP 50 preloads, and simulation copy runner. Use when the user mentions Whale Lens, the whale dashboard, Hyperliquid tracking, paper copy trading, or this private repository.
+description: Open, inspect, run, test, and maintain the private Hyperliquid Whale Lens workspace, including the verified 30-day perp TWR screener, trading-analysis dashboard, saved TOP2000/TOP10 lists, and simulation copy runner. Use when the user mentions Whale Lens, whale ranking, Hyperliquid tracking, paper copy trading, or this private repository.
 ---
 
 # Hyperliquid Whale Lens
@@ -22,6 +22,16 @@ Treat the active worktree as authoritative for a currently running local simulat
 3. For screening work, follow `docs/workflows/daily-whale-screen.md` and the repository `SKILL.md`.
 4. For dashboard or copy-runner work, follow `docs/workflows/wallet-trading-dashboard.md`.
 5. Verify focused tests before broad builds. Surface incomplete Hyperliquid data instead of estimating it.
+
+## Screening contract
+
+- Rank only by verified `perp_cashflow_neutral_twr_30d`; leaderboard ROI/PnL/turnover are discovery signals.
+- Build a deterministic 5,000~7,000 wallet pool, score all provisionally, and fully score a persistent 1,000-wallet outside shard while backfilling the rotating 500 quota. Ledger-verify from the top 2,500 with 500-wallet expansion and 100-wallet boundary probes, freeze verified TOP2000, then scan raw fills until 10 wallets have at least 10 completed episodes.
+- Use only `portfolio.perpMonth`, explicit non-funding-ledger cash-flow mappings, and `aggregateByTime:false` fills. MDD is diagnostic, not a selection filter.
+- Clip to one run-wide fixed window and score only real aligned samples inside it; never interpolate or relabel an out-of-window observation as an exact boundary.
+- Preserve the previous canonical TOP10 on pool or outside-shard coverage gaps, fewer than 2,000 verified candidates, boundary instability, fewer than 10 finalists, or report/candidate/config hash mismatch.
+- Warm-start a new API limiter from zero tokens and retry failed checkpoint rows on resume so an initial 429 burst cannot silently create a canonical coverage hole.
+- Keep timestamped lists and `latest` files under `reports/perp-twr-*` and `state/perp-twr-*`. The copy runner must load and cross-check canonical state instead of trusting hardcoded seeds.
 
 ## Safety boundaries
 
@@ -49,6 +59,7 @@ For the screener:
 cd C:\claude-develop\hyperliquid_clone_trading
 python -m unittest discover -s tests -v
 python src\hyperliquid_whale_screener.py
+python src\hyperliquid_whale_screener.py --resume
 ```
 
 When handing off, state which worktree changed, what was verified, whether the private mirror was synchronized, and whether the running simulation was touched.

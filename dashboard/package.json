@@ -17,6 +17,7 @@
     "local:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Get-LocalStatus.ps1",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "data:prefetch": "tsx scripts/prefetch-wallets.ts",
+    "data:sync-canonical": "tsx scripts/sync-canonical-seeds.ts",
     "data:compact": "tsx scripts/compact-preloaded-wallets.ts",
     "backtest:equity": "tsx scripts/backtest-equity-sizing.ts",
     "db:generate": "drizzle-kit generate"

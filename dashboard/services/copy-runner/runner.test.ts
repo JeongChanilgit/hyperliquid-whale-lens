@@ -24,6 +24,14 @@ const config = (mode: "SIMULATION" | "HYPERLIQUID"): CopyRunnerConfig => ({
   controlToken: "private-test-token",
   autoStart: false,
   requireFlatStart: false,
+  canonical: {
+    runId: "run-test",
+    asOfMs: Date.now(),
+    coverageMode: "FAST_INCREMENTAL",
+    rankingScope: "DISCOVERY_POOL_EXACT",
+    configHash: "a".repeat(64),
+    candidatePoolHash: "b".repeat(64),
+  },
 });
 
 test("live runner cannot start or arm through a browser-only confirmation", async () => {

@@ -1,6 +1,8 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { CopyEngineConfig, CopyEntryPolicy, CopyMode, WhaleConfig } from "../../app/lib/copy-types";
 import { SEED_WALLETS } from "../../app/seed-wallets";
+import { loadCanonicalTop10 } from "./canonical-whales";
 
 export interface CopyRunnerConfig {
   engine: CopyEngineConfig;
@@ -10,6 +12,14 @@ export interface CopyRunnerConfig {
   controlToken: string;
   autoStart: boolean;
   requireFlatStart: boolean;
+  canonical: {
+    runId: string;
+    asOfMs: number;
+    coverageMode: string;
+    rankingScope: string;
+    configHash: string;
+    candidatePoolHash: string;
+  };
   session?: {
     startedAtMs: number;
     endsAtMs: number;
@@ -40,9 +50,10 @@ const timestamp = (env: NodeJS.ProcessEnv, key: string): number | undefined => {
   return parsed;
 };
 const DEFAULT_SYMBOLS = "*";
-const DEFAULT_WHALES = JSON.stringify(
-  SEED_WALLETS.filter((wallet) => wallet.status === "ACTIVE").slice(0, 10).map((wallet) => ({ address: wallet.address, copyRatio: 0.01 })),
-);
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const DEFAULT_CANONICAL_STATE = resolve(PROJECT_ROOT, "state/perp-twr-top10/latest_active_top10.json");
+const DEFAULT_DISCOVERY_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-discovery/latest.json");
+const DEFAULT_CANDIDATE_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-candidates/latest-top2000.json");
 
 const parseWhales = (raw: string): WhaleConfig[] => {
   let decoded: unknown;
@@ -75,7 +86,36 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
   if (entryPolicy === "REPLAY_OPEN_EPISODES" && mode !== "SIMULATION") {
     throw new Error("COPY_RUNNER_ENTRY_POLICY=REPLAY_OPEN_EPISODES is supported only in SIMULATION mode");
   }
-  const whales = parseWhales(env.COPY_RUNNER_WHALES?.trim() || DEFAULT_WHALES);
+  const canonical = loadCanonicalTop10({
+    statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_CANONICAL_STATE),
+    reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_DISCOVERY_REPORT),
+    candidatePath: resolve(env.COPY_RUNNER_CANONICAL_CANDIDATES?.trim() || DEFAULT_CANDIDATE_REPORT),
+    maxAgeMs: number(env, "COPY_RUNNER_CANONICAL_MAX_AGE_MS", 48 * 60 * 60 * 1_000, 60_000),
+  });
+  const canonicalWhales: WhaleConfig[] = canonical.wallets.map((wallet) => ({
+    address: wallet.address,
+    label: wallet.label,
+    copyRatio: 0.01,
+  }));
+  if (env.COPY_RUNNER_REQUIRE_SEED_MATCH !== "false") {
+    const activeSeedAddresses = SEED_WALLETS
+      .filter((wallet) => wallet.status === "ACTIVE")
+      .sort((left, right) => left.label.localeCompare(right.label))
+      .map((wallet) => wallet.address.toLowerCase());
+    const canonicalAddresses = canonicalWhales.map((wallet) => wallet.address);
+    if (JSON.stringify(activeSeedAddresses) !== JSON.stringify(canonicalAddresses)) {
+      throw new Error("dashboard ACTIVE seed wallets do not exactly match the verified canonical TOP 10");
+    }
+  }
+  if (env.COPY_RUNNER_WHALES?.trim()) {
+    const configuredWhales = parseWhales(env.COPY_RUNNER_WHALES);
+    const configuredAddresses = configuredWhales.map((wallet) => wallet.address);
+    const canonicalAddresses = canonicalWhales.map((wallet) => wallet.address);
+    if (JSON.stringify(configuredAddresses) !== JSON.stringify(canonicalAddresses)) {
+      throw new Error("COPY_RUNNER_WHALES does not exactly match the verified canonical TOP 10");
+    }
+  }
+  const whales = canonicalWhales;
   const allowedSymbols = csv(env.COPY_RUNNER_ALLOWED_SYMBOLS || DEFAULT_SYMBOLS);
   if (allowedSymbols.length === 0) throw new Error("COPY_RUNNER_ALLOWED_SYMBOLS must contain at least one symbol or *");
   const allowedWhales = whales.map((whale) => whale.address);
@@ -116,6 +156,14 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
     controlToken,
     autoStart: truthy(env.COPY_RUNNER_AUTOSTART, true),
     requireFlatStart: truthy(env.COPY_RUNNER_REQUIRE_FLAT_START, true),
+    canonical: {
+      runId: canonical.runId,
+      asOfMs: canonical.asOfMs,
+      coverageMode: canonical.coverageMode,
+      rankingScope: canonical.rankingScope,
+      configHash: canonical.configHash,
+      candidatePoolHash: canonical.candidatePoolHash,
+    },
     ...(sessionStartedAtMs !== undefined && sessionEndsAtMs !== undefined
       ? { session: { startedAtMs: sessionStartedAtMs, endsAtMs: sessionEndsAtMs } }
       : {}),

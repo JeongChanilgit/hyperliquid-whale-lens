@@ -25,11 +25,13 @@ INFO_URL = "https://api.hyperliquid.xyz/info"
 THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 MIN_ACCOUNT_VALUE = Decimal("10000")
 MIN_COMPLETED_EPISODES = 10
-TARGET_WHALE_COUNT = 50
+TARGET_WHALE_COUNT = 10
 MDD_CUTOFF = Decimal("0.40")
 RANKING_OFFICIAL_ROI = "official-roi"
 RANKING_PORTFOLIO_GROWTH = "portfolio-growth"
 RANKING_COMPOUNDED_GROWTH = "compounded-growth"
+RANKING_PERP_TWR = "perp-cashflow-neutral-twr"
+RANKING_LEGACY_MONTH_ROI = "legacy-month-roi"
 TIME_PAGE_FLOOR = 500
 FILL_AVAILABILITY_LIMIT = 10_000
 # Hyperliquid position sizes use no more than 8 decimal places. Residuals below
@@ -963,14 +965,38 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=30)
-    parser.add_argument("--candidate-limit", type=int, default=500)
+    parser.add_argument("--candidate-limit", type=int, default=500, help=argparse.SUPPRESS)
     parser.add_argument("--target-count", type=int, default=TARGET_WHALE_COUNT)
     parser.add_argument(
         "--ranking-metric",
-        choices=(RANKING_OFFICIAL_ROI, RANKING_PORTFOLIO_GROWTH, RANKING_COMPOUNDED_GROWTH),
-        default=RANKING_COMPOUNDED_GROWTH,
-        help="rank by sampled cash-flow-neutral compounded growth (default) or a legacy metric",
+        choices=(RANKING_PERP_TWR, RANKING_LEGACY_MONTH_ROI),
+        default=RANKING_PERP_TWR,
+        help="rank by verified perp cash-flow-neutral TWR (default); legacy leaderboard ROI is opt-in only",
     )
+    parser.add_argument("--coverage-mode", choices=("fast-incremental", "full-discovery-refresh"), default="fast-incremental")
+    parser.add_argument("--minimum-account-value", type=Decimal, default=Decimal("10000"))
+    parser.add_argument("--leaderboard-roi-top", type=int, default=3000)
+    parser.add_argument("--leaderboard-pnl-top", type=int, default=2000)
+    parser.add_argument("--leaderboard-turnover-top", type=int, default=2000)
+    parser.add_argument("--prior-verified-top", type=int, default=2000)
+    parser.add_argument("--new-wallet-top", type=int, default=500)
+    parser.add_argument("--rotating-sample-count", type=int, default=500)
+    parser.add_argument("--discovery-pool-target", type=int, default=6000)
+    parser.add_argument("--discovery-pool-min", type=int, default=5000)
+    parser.add_argument("--discovery-pool-max", type=int, default=7000)
+    parser.add_argument("--ledger-verification-count", type=int, default=2500)
+    parser.add_argument("--ledger-expand-step", type=int, default=500)
+    parser.add_argument("--boundary-probe-count", type=int, default=100)
+    parser.add_argument("--candidate-count", type=int, default=2000)
+    parser.add_argument("--minimum-completed-episodes", type=int, default=10)
+    parser.add_argument("--fill-validation-mode", choices=("until-10", "full-2000"), default="until-10")
+    parser.add_argument("--strict-cashflow-boundaries", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--portfolio-request-budget", type=int, default=8000)
+    parser.add_argument("--ledger-request-budget", type=int, default=7000)
+    parser.add_argument("--fill-request-budget", type=int, default=4000)
+    parser.add_argument("--cache-dir", default="state/perp-twr-cache")
+    parser.add_argument("--run-id")
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--request-delay", type=float, default=1.05)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--retries", type=int, default=3)
@@ -991,8 +1017,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="do not compare this run with the saved ACTIVE TOP 10; replace it after success",
     )
     args = parser.parse_args(argv)
-    if args.days <= 0 or args.candidate_limit <= 0 or args.target_count <= 0 or args.request_delay < 0:
-        parser.error("days, candidate-limit, and target-count must be positive; request-delay cannot be negative")
+    positive = (
+        args.days, args.candidate_limit, args.target_count, args.leaderboard_roi_top,
+        args.leaderboard_pnl_top, args.leaderboard_turnover_top, args.prior_verified_top,
+        args.new_wallet_top, args.rotating_sample_count, args.discovery_pool_target,
+        args.discovery_pool_min, args.discovery_pool_max, args.ledger_verification_count,
+        args.ledger_expand_step, args.boundary_probe_count, args.candidate_count,
+        args.minimum_completed_episodes, args.portfolio_request_budget,
+        args.ledger_request_budget, args.fill_request_budget,
+    )
+    if any(value <= 0 for value in positive) or args.request_delay < 0 or args.minimum_account_value < 0:
+        parser.error("screening counts and budgets must be positive; delays/account minimum cannot be negative")
     return args
 
 
@@ -1001,7 +1036,44 @@ def main(argv: list[str] | None = None) -> int:
         args = parse_args(argv)
         if args.rerank_report:
             rerank_existing_report(args)
+        elif args.ranking_metric == RANKING_PERP_TWR:
+            from whale_lens.pipeline import ScreenConfig, ScreenPaths, WhaleScreenPipeline
+
+            config = ScreenConfig(
+                days=args.days,
+                coverage_mode=args.coverage_mode.replace("-", "_").upper(),
+                minimum_account_value_usd=args.minimum_account_value,
+                leaderboard_roi_top_n=args.leaderboard_roi_top,
+                leaderboard_pnl_top_n=args.leaderboard_pnl_top,
+                leaderboard_turnover_top_n=args.leaderboard_turnover_top,
+                prior_verified_top_n=args.prior_verified_top,
+                new_wallet_top_n=args.new_wallet_top,
+                rotating_sample_n=args.rotating_sample_count,
+                discovery_pool_target=args.discovery_pool_target,
+                discovery_pool_min=args.discovery_pool_min,
+                discovery_pool_max=args.discovery_pool_max,
+                ledger_verification_initial_n=args.ledger_verification_count,
+                ledger_verification_expand_step=args.ledger_expand_step,
+                boundary_probe_n=args.boundary_probe_count,
+                candidate_count=args.candidate_count,
+                final_active_count=args.target_count,
+                minimum_completed_episodes=args.minimum_completed_episodes,
+                fill_validation_mode=args.fill_validation_mode.replace("-", "_").upper(),
+                strict_cashflow_boundaries=args.strict_cashflow_boundaries,
+                portfolio_request_budget=args.portfolio_request_budget,
+                ledger_request_budget=args.ledger_request_budget,
+                fill_request_budget=args.fill_request_budget,
+                timeout_seconds=args.timeout,
+                retries=args.retries,
+            )
+            WhaleScreenPipeline(
+                config,
+                ScreenPaths(Path(args.reports_dir), Path(args.state_dir), Path(args.cache_dir)),
+                run_id=args.run_id,
+                resume=args.resume,
+            ).run()
         else:
+            args.ranking_metric = RANKING_OFFICIAL_ROI
             run(args)
         return 0
     except KeyboardInterrupt:

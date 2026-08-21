@@ -6,7 +6,10 @@ Long-lived Node 22+ service for ten independent Hyperliquid source streams. It o
 
 ```text
 COPY_RUNNER_CONTROL_TOKEN=a-long-random-private-token
-COPY_RUNNER_WHALES=[{"address":"0x...","copyRatio":0.01}]
+COPY_RUNNER_CANONICAL_STATE=../state/perp-twr-top10/latest_active_top10.json
+COPY_RUNNER_CANONICAL_REPORT=../reports/perp-twr-discovery/latest.json
+COPY_RUNNER_CANONICAL_CANDIDATES=../reports/perp-twr-candidates/latest-top2000.json
+COPY_RUNNER_CANONICAL_MAX_AGE_MS=172800000
 COPY_RUNNER_ALLOWED_SYMBOLS=*
 COPY_RUNNER_FOLLOWER_CAPITAL_USD=1000
 COPY_RUNNER_MAX_ACCOUNT_STATE_AGE_MS=60000
@@ -22,7 +25,7 @@ COPY_RUNNER_SESSION_STARTED_AT_MS=1786752000000
 COPY_RUNNER_SESSION_ENDS_AT_MS=1787011200000
 ```
 
-The seeded TOP 10 each own a separate $100 paper wallet. Quantity is `source order quantity * (current follower equity / current source equity)`. There is no default 20x cap: the source's public per-asset cross/isolated and leverage setting is the authority. Missing or stale source equity fails closed.
+The hash-verified canonical TOP 10 each own a separate $100 paper wallet. A new runner refuses stale/partial state or a report/config/candidate hash mismatch; an optional `COPY_RUNNER_WHALES` override is accepted only when its ordered addresses exactly match canonical. The dashboard's ten `ACTIVE` entries must also match canonical, preventing the analysis UI and paper runner from silently showing different whale sets (`COPY_RUNNER_REQUIRE_SEED_MATCH=false` is for isolated tests only). Quantity is `source order quantity * (current follower equity / current source equity)`. There is no default 20x cap: the source's public per-asset cross/isolated and leverage setting is the authority. Missing or stale source equity fails closed.
 
 `COPY_RUNNER_ENTRY_POLICY=NEW_POSITIONS_ONLY` leaves positions already open at session startup—and their reduce-only/TP/SL orders—out of the follower ledger. A same-direction increase after the session starts is tracked as new exposure without adopting the startup balance; later reductions can close only that tracked amount. A flat-to-open entry is copied normally, and a one-fill reversal copies only the new opposite-side remainder. `INCLUDE_EXISTING` retains the legacy source-entry carry-in behavior.
 

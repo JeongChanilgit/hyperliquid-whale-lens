@@ -144,7 +144,7 @@ function decodeCursor(value: string | null): Cursor {
   if (!value) return { at: Number.MAX_SAFE_INTEGER, id: "\uffff" };
   try {
     const decoded = JSON.parse(atob(value)) as Partial<Cursor>;
-    if (typeof decoded.id !== "string" || !Number.isFinite(decoded.at)) {
+    if (typeof decoded.id !== "string" || typeof decoded.at !== "number" || !Number.isFinite(decoded.at)) {
       throw new Error("invalid cursor");
     }
     return { at: decoded.at, id: decoded.id };
@@ -155,7 +155,8 @@ function decodeCursor(value: string | null): Cursor {
 
 function encodeCursor(row: { createdAt?: number; occurredAt?: number; id: string } | undefined): string | null {
   if (!row) return null;
-  return btoa(JSON.stringify({ at: row.createdAt ?? row.occurredAt, id: row.id }));
+  const at = row.createdAt ?? row.occurredAt;
+  return typeof at === "number" ? btoa(JSON.stringify({ at, id: row.id })) : null;
 }
 
 function pageSize(value: number | null | undefined): number {

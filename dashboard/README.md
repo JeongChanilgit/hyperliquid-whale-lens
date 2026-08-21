@@ -30,7 +30,7 @@ npm run local:stop
 - 로컬 시작 스크립트는 `HYPERLIQUID_ENABLED=false`, `COPY_RUNNER_MODE=SIMULATION`을 **강제**하므로 실제 주문을 전송하지 않습니다.
 - Windows 예약 작업 `WhaleLensCopyRunner`처럼 이미 `127.0.0.1:8788`에서 표준 local simulation runner가 건강하게 실행 중이면 이를 **adopt**하고 site만 시작합니다. adoption한 runner는 `local:stop`으로 종료되지 않습니다.
 - 표준 로컬 모의투자 runner가 이미 실행 중이면 안전하게 연결해서 재사용합니다. 기본 사이트 포트 3000이 사용 중이면 3010까지 다음 빈 포트를 자동 선택하며, 실행 중인 data prefetch/copy-runner 작업은 경고로 표시됩니다.
-- 중지 명령은 이 스크립트가 시작해 PID와 시작 시각을 기록한 프로세스 트리만 종료합니다. local simulation bridge token은 `whale-lens-local-simulation-only-v1`로 통일되며, 실제 secret은 저장소나 `.env.example`에 쓰지 않습니다.
+- 중지 명령은 이 스크립트가 시작해 PID와 시작 시각을 기록한 프로세스 트리만 종료합니다. 로컬 스크립트 내부의 simulation-only bridge token은 실주문에 사용할 수 없고, 실제 secret은 저장소나 `.env.example`에 쓰지 않습니다.
 
 ## 동작 원칙
 

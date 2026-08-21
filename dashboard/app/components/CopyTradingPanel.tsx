@@ -65,6 +65,8 @@ export type CopyTradingOrder = {
   metadataComplete?: boolean;
   leverageCapped?: boolean;
   closeAll?: boolean;
+  /** True when the order was observed in the source startup snapshot. */
+  startupSnapshot?: boolean;
 };
 
 export type CopyTradingFailureLog = {

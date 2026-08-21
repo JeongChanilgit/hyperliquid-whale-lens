@@ -40,6 +40,22 @@ logs/
 *.log
 *.pid
 
+# Screening runtime: publish audited run reports (including explicit PARTIAL
+# diagnostics) and only hash-linked VERIFIED canonical state. Raw caches,
+# checkpoints, discovery-cycle state, pilots, and legacy ranking reports stay local.
+/reports/**
+!/reports/perp-twr-discovery/
+!/reports/perp-twr-discovery/latest.json
+!/reports/perp-twr-discovery/latest.md
+!/reports/perp-twr-discovery/run-perp-twr-*.json
+!/reports/perp-twr-discovery/run-perp-twr-*.md
+!/reports/perp-twr-candidates/
+!/reports/perp-twr-candidates/latest-top2000.json
+!/reports/perp-twr-candidates/run-perp-twr-*-top2000.json
+/state/**
+!/state/perp-twr-top10/
+!/state/perp-twr-top10/latest_active_top10.json
+
 # Local packaging/caches
 work/
 .DS_Store

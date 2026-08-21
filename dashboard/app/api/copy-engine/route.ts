@@ -120,18 +120,11 @@ export async function POST(request: Request): Promise<Response> {
     }
     try {
       engineGlobal.__copyEngine?.stop();
-      // Credentials are read only here, on the server; the browser never supplies them.
-      const execution = HyperliquidExecutionAdapter.fromEnvironment();
-      if (config.mode === "HYPERLIQUID" && !execution.enabled) {
-        return json({ error: "Hyperliquid server environment is not enabled or is incomplete" }, 503);
-      }
-      if (config.mode === "HYPERLIQUID") {
-        const preflight = await execution.preflight(config.whales.map((whale) => whale.address));
-        if (!preflight.ok) return json({ error: preflight.reason ?? "Hyperliquid preflight failed" }, 503);
-      }
-      engineGlobal.__copyEngine = new RealtimeCopyEngine({ config, execution });
+      // This legacy in-process path is simulation-only. Live execution remains
+      // exclusively in the standalone runner after a server-side arm.
+      engineGlobal.__copyEngine = new RealtimeCopyEngine({ config });
       engineGlobal.__copyEngine.start();
-      return json({ snapshot: engineGlobal.__copyEngine.snapshot(), executionEnabled: execution.enabled, testnet: execution.testnet }, 201);
+      return json({ snapshot: engineGlobal.__copyEngine.snapshot(), executionEnabled: false, testnet: true }, 201);
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "Unable to start copy engine" }, 400);
     }

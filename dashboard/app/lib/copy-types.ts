@@ -289,6 +289,8 @@ export interface HyperliquidCloneOrderRequest {
   closeAll?: boolean;
   triggerPrice?: number;
   leverage?: HyperliquidLeverage;
+  /** Desired post-fill follower position used only by the server-side settlement check. */
+  targetPositionAfter?: number;
 }
 
 export interface HyperliquidCloneResult {

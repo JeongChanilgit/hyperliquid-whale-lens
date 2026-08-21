@@ -20,6 +20,7 @@ test("SQLite store persists idempotency, state, performance, and expected positi
   const snapshot = {
     state: "RUNNING",
     mode: "SIMULATION",
+    entryPolicy: "INCLUDE_EXISTING",
     watchedWhales: ["0x1111111111111111111111111111111111111111"],
     performance,
     performanceByWhale: { "0x1111111111111111111111111111111111111111": performance },

@@ -8,6 +8,10 @@ param(
   [double]$CopyRatio = 0.01,
   [ValidateRange(1, 1000000000)]
   [double]$FollowerCapitalUsd = 1000,
+  [ValidateRange(1, 365)]
+  [int]$SessionDays = 7,
+  [ValidateSet('REPLAY_OPEN_EPISODES', 'NEW_POSITIONS_ONLY', 'INCLUDE_EXISTING')]
+  [string]$EntryPolicy = 'REPLAY_OPEN_EPISODES',
   [string]$AllowedSymbols = '*',
   [int]$RunnerPort = 8788,
   [int]$SitePort = 3000
@@ -15,9 +19,37 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $dashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$projectRoot = (Resolve-Path (Join-Path $dashboardRoot '..')).Path
+$canonicalStatePath = Join-Path $projectRoot 'state\perp-twr-top10\latest_active_top10.json'
+$canonicalReportPath = Join-Path $projectRoot 'reports\perp-twr-discovery\latest.json'
+$canonicalCandidatesPath = Join-Path $projectRoot 'reports\perp-twr-candidates\latest-top2000.json'
 $stateRoot = Join-Path $env:LOCALAPPDATA 'WhaleLens'
 $statePath = Join-Path $stateRoot 'local-copy-state.json'
 $localSimulationToken = 'whale-lens-local-simulation-only-v1'
+
+function Assert-CanonicalPaperStart {
+  if ($Action -ne 'Start') { return }
+  if ($WhaleAddress.Count -ne 0) {
+    throw 'Local paper start always uses the verified canonical TOP 10; WhaleAddress overrides are not allowed.'
+  }
+  if ($CopyRatio -ne 0.01) {
+    throw 'Local paper start uses the fixed canonical copy ratio of 0.01.'
+  }
+  if ($FollowerCapitalUsd -ne 1000) {
+    throw 'Local paper start uses exactly $1000 total capital ($100 for each canonical whale).'
+  }
+  if ($SessionDays -ne 7) {
+    throw 'Local paper start always creates an exact 7-day session.'
+  }
+  if ($EntryPolicy -ne 'REPLAY_OPEN_EPISODES') {
+    throw 'Local paper start always uses REPLAY_OPEN_EPISODES.'
+  }
+  if ($AllowedSymbols -ne '*') {
+    throw 'Local paper start always monitors all canonical source symbols.'
+  }
+}
+
+Assert-CanonicalPaperStart
 
 function Get-LocalState {
   if (-not (Test-Path -LiteralPath $statePath)) { return $null }
@@ -99,7 +131,7 @@ function Stop-ManagedProcess {
 
 function Get-WhaleConfig {
   if ($WhaleAddress.Count -eq 0) {
-    # Omit COPY_RUNNER_WHALES so the runner uses its screened SEED_WALLETS top 10.
+    # Omit the override so the runner reads the verified canonical TOP 10.
     return $null
   }
   if ($WhaleAddress.Count -lt 1 -or $WhaleAddress.Count -gt 10) { throw 'Provide between 1 and 10 wallet addresses.' }
@@ -113,7 +145,7 @@ function Get-WhaleConfig {
 
 function Start-LocalStack {
   $state = Get-LocalState
-  $trackedRunner = $state -and (($state.Runner.Owned -eq $true -and (Test-ManagedProcess $state.Runner)) -or ($state.Runner.Owned -eq $false -and (Test-AdoptableRunner)))
+  $trackedRunner = $state -and (Test-ManagedProcess $state.Runner)
   if ($state -and $trackedRunner -and (Test-ManagedProcess $state.Site) -and
       (Test-LocalSiteHealth ([int]$state.SitePort)) -and (Test-LocalRunnerHealth)) {
     Write-Host "Local site and runner are already managed by this user session. Run npm run local:status."
@@ -125,14 +157,8 @@ function Start-LocalStack {
     Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
   }
   $runnerListeners = Get-ListenerProcessIds $RunnerPort
-  $adoptedRunner = $false
   if ($runnerListeners.Count -gt 0) {
-    if (Test-AdoptableRunner) {
-      $adoptedRunner = $true
-      Write-Host "Adopting the healthy localhost simulation runner on port $RunnerPort."
-    } else {
-      throw "Port $RunnerPort is already listening (PID(s): $($runnerListeners -join ', ')) but is not the standard healthy local simulation runner."
-    }
+    throw "Port $RunnerPort is already listening (PID(s): $($runnerListeners -join ', ')). Stop it before creating a new canonical paper session."
   }
   $requestedSitePort = $SitePort
   $siteListeners = Get-ListenerProcessIds $SitePort
@@ -157,6 +183,14 @@ function Start-LocalStack {
 
   $whales = Get-WhaleConfig
   $token = $localSimulationToken
+  $sessionStartedAtMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $sessionEndsAtMs = $sessionStartedAtMs + ([int64]$SessionDays * 86400000)
+  $sessionStamp = [DateTimeOffset]::FromUnixTimeMilliseconds($sessionStartedAtMs).UtcDateTime.ToString('yyyyMMddTHHmmssfffZ')
+  $sessionNonce = [guid]::NewGuid().ToString('N')
+  $sessionDatabase = Join-Path $dashboardRoot "data\sessions\paper-$sessionStamp-$sessionNonce-top10-${SessionDays}d.sqlite"
+  if (Test-Path -LiteralPath $sessionDatabase) {
+    throw "Refusing to reuse an existing paper-session database: $sessionDatabase"
+  }
   $runnerEnvironment = @{
     COPY_RUNNER_ALLOWED_SYMBOLS = $AllowedSymbols
     COPY_RUNNER_MODE = 'SIMULATION'
@@ -165,7 +199,14 @@ function Start-LocalStack {
     COPY_RUNNER_CONTROL_TOKEN = $token
     COPY_RUNNER_AUTOSTART = 'true'
     COPY_RUNNER_REQUIRE_FLAT_START = 'true'
+    COPY_RUNNER_ENTRY_POLICY = $EntryPolicy
     COPY_RUNNER_FOLLOWER_CAPITAL_USD = [string]$FollowerCapitalUsd
+    COPY_RUNNER_SESSION_STARTED_AT_MS = [string]$sessionStartedAtMs
+    COPY_RUNNER_SESSION_ENDS_AT_MS = [string]$sessionEndsAtMs
+    COPY_RUNNER_DATABASE = $sessionDatabase
+    COPY_RUNNER_CANONICAL_STATE = $canonicalStatePath
+    COPY_RUNNER_CANONICAL_REPORT = $canonicalReportPath
+    COPY_RUNNER_CANONICAL_CANDIDATES = $canonicalCandidatesPath
     HYPERLIQUID_ENABLED = 'false'
     HYPERLIQUID_TESTNET = 'true'
     HYPERLIQUID_AGENT_PRIVATE_KEY = ''
@@ -185,19 +226,25 @@ function Start-LocalStack {
   foreach ($key in @($runnerEnvironment.Keys + $siteEnvironment.Keys | Select-Object -Unique)) { $original[$key] = [Environment]::GetEnvironmentVariable($key, 'Process') }
   try {
     $runner = $null
-    if (-not $adoptedRunner) {
-      foreach ($pair in $runnerEnvironment.GetEnumerator()) { [Environment]::SetEnvironmentVariable($pair.Key, $pair.Value, 'Process') }
-      $runner = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'copy-runner') -WorkingDirectory $dashboardRoot -WindowStyle Hidden -PassThru
-      $deadline = (Get-Date).AddSeconds(15)
-      while ((Get-Date) -lt $deadline -and -not (Test-AdoptableRunner)) { Start-Sleep -Milliseconds 250 }
-      if (-not (Test-AdoptableRunner)) {
-        Stop-Process -Id $runner.Id -ErrorAction SilentlyContinue
-        throw 'The local runner did not become a healthy simulation bridge. Check npm run copy-runner manually for configuration errors.'
+    foreach ($canonicalPath in @($canonicalStatePath, $canonicalReportPath, $canonicalCandidatesPath)) {
+      if (-not (Test-Path -LiteralPath $canonicalPath -PathType Leaf)) {
+        throw "Verified screener output is missing: $canonicalPath. Complete the screener before starting a new runner."
       }
+    }
+    foreach ($pair in $runnerEnvironment.GetEnumerator()) { [Environment]::SetEnvironmentVariable($pair.Key, $pair.Value, 'Process') }
+    $runner = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'copy-runner') -WorkingDirectory $dashboardRoot -WindowStyle Hidden -PassThru
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline -and -not (Test-AdoptableRunner)) { Start-Sleep -Milliseconds 250 }
+    if (-not (Test-AdoptableRunner)) {
+      Stop-Process -Id $runner.Id -ErrorAction SilentlyContinue
+      throw 'The local runner did not become a healthy simulation bridge. Check npm run copy-runner manually for configuration errors.'
     }
     foreach ($pair in $siteEnvironment.GetEnumerator()) { [Environment]::SetEnvironmentVariable($pair.Key, $pair.Value, 'Process') }
     $site = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev', '--', '--host', '127.0.0.1', '--port', [string]$SitePort) -WorkingDirectory $dashboardRoot -WindowStyle Hidden -PassThru
-    $siteDeadline = (Get-Date).AddSeconds(15)
+    # A cold Vinext/Miniflare worker can take longer than 15 seconds after a
+    # stale worker or cache rebuild. Do not kill an otherwise healthy site
+    # before its first request has finished compiling.
+    $siteDeadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $siteDeadline -and -not (Test-LocalSiteHealth $SitePort)) { Start-Sleep -Milliseconds 250 }
     if (-not (Test-LocalSiteHealth $SitePort)) {
       Stop-ManagedProcess ([pscustomobject]@{ Owned = $true; Pid = $site.Id; StartedUtc = $site.StartTime.ToUniversalTime().ToString('o') }) 'site'
@@ -205,16 +252,14 @@ function Start-LocalStack {
     }
     New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     [ordered]@{
-      Runner = if ($adoptedRunner) { [ordered]@{ Owned = $false; Port = $RunnerPort } } else { [ordered]@{ Owned = $true; Pid = $runner.Id; StartedUtc = $runner.StartTime.ToUniversalTime().ToString('o') }
-      }
+      Runner = [ordered]@{ Owned = $true; Pid = $runner.Id; StartedUtc = $runner.StartTime.ToUniversalTime().ToString('o') }
       Site = [ordered]@{ Owned = $true; Pid = $site.Id; StartedUtc = $site.StartTime.ToUniversalTime().ToString('o') }
       RunnerPort = $RunnerPort
       SitePort = $SitePort
       ControlToken = $token
       StartedUtc = (Get-Date).ToUniversalTime().ToString('o')
     } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding utf8
-    $runnerMessage = if ($adoptedRunner) { 'Adopted local runner' } else { 'Started local runner' }
-    Write-Host "$runnerMessage at http://127.0.0.1:$RunnerPort and started site at http://127.0.0.1:$SitePort."
+    Write-Host "Started local runner at http://127.0.0.1:$RunnerPort and started site at http://127.0.0.1:$SitePort."
     Write-Host 'Hyperliquid live signing is forced disabled; this command only runs simulation.'
   } finally {
     foreach ($pair in $original.GetEnumerator()) { [Environment]::SetEnvironmentVariable($pair.Key, $pair.Value, 'Process') }
@@ -232,7 +277,7 @@ function Stop-LocalStack {
 function Show-LocalStatus {
   $state = Get-LocalState
   if (-not $state) { Write-Host 'Local stack: stopped (no managed state).'; return }
-  $runner = if ($state.Runner.Owned -eq $false) { Test-AdoptableRunner } else { Test-ManagedProcess $state.Runner }
+  $runner = Test-ManagedProcess $state.Runner
   $site = Test-ManagedProcess $state.Site
   $siteHealth = $site -and (Test-LocalSiteHealth ([int]$state.SitePort))
   $health = Test-LocalRunnerHealth
@@ -248,6 +293,7 @@ function Show-LocalStatus {
         followerCapitalUsd = $status.engine.sizing.followerCapitalUsd
         allocationPerWhaleUsd = $status.engine.sizing.allocationPerWhaleUsd
         leveragePolicy = 'COPY_SOURCE_EXACTLY'
+        entryPolicy = $status.engine.entryPolicy
         watchedWhales = @($status.engine.watchedWhales).Count
         watchedWhaleAddresses = @($status.engine.watchedWhales)
         sessionStartedAt = $status.session.startedAt

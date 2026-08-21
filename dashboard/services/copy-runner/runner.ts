@@ -205,6 +205,7 @@ export class StandaloneCopyRunner {
       : persistedOrders;
     return {
       databasePath: this.config.databasePath,
+      canonical: this.config.canonical,
       engine: engineSnapshot ? { ...engineSnapshot, mirroredOrders, equityHistory } : null,
       executionEnabled: this.executionEnabled,
       liveArmed: this.liveArmed(),

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { HyperliquidClient, THIRTY_DAYS_MS } from "../app/lib/hyperliquid";
 import { classifyTradingEvents } from "../app/lib/trading-events";
-import type { WalletBundle } from "../app/lib/types";
+import type { PortfolioHistory, WalletBundle } from "../app/lib/types";
 import { SEED_WALLETS } from "../app/seed-wallets";
 
 const OUTPUT_DIR = join(process.cwd(), "public", "preloaded", "wallets");
@@ -84,7 +84,7 @@ for (const [index, wallet] of SEED_WALLETS.entries()) {
     retryRateLimited(() => client.portfolio(address)),
   ]).then(([result]) => result);
   const orders = ordersResult.status === "fulfilled" ? ordersResult.value : [];
-  const portfolio = portfolioResult.status === "fulfilled" ? portfolioResult.value : { periods: {} };
+  const portfolio: PortfolioHistory = portfolioResult.status === "fulfilled" ? portfolioResult.value : { periods: {} };
   const classification = classifyTradingEvents(fillResult.fills, orders);
   const warnings = [...classification.warnings];
   if (!fillResult.coverage.complete && fillResult.coverage.incompleteReason) {
@@ -99,7 +99,7 @@ for (const [index, wallet] of SEED_WALLETS.entries()) {
     return compactEvent;
   });
   const compactEpisodes = classification.episodes.map((episode) => ({ ...episode, fillIds: [] }));
-  const compactPortfolio = portfolio.month
+  const compactPortfolio: PortfolioHistory = portfolio.month
     ? { periods: { month: portfolio.month }, month: portfolio.month }
     : { periods: {} };
   const bundle: WalletBundle = {

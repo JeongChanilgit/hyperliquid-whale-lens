@@ -209,7 +209,7 @@ class MetricTests(unittest.TestCase):
 
     def test_minimum_completed_episode_cut_is_ten(self):
         self.assertEqual(MIN_COMPLETED_EPISODES, 10)
-        self.assertEqual(TARGET_WHALE_COUNT, 50)
+        self.assertEqual(TARGET_WHALE_COUNT, 10)
 
 
 if __name__ == "__main__":
