@@ -55,6 +55,11 @@ logs/
 !/reports/perp-twr-research/
 !/reports/perp-twr-research/latest.json
 !/reports/perp-twr-research/latest-candidates.json
+!/reports/perp-twr-activity-90d/
+!/reports/perp-twr-activity-90d/latest.json
+!/reports/perp-twr-activity-90d/latest.md
+!/reports/perp-twr-activity-90d/run-*.json
+!/reports/perp-twr-activity-90d/run-*.md
 /state/**
 !/state/perp-twr-top10/
 !/state/perp-twr-top10/latest_active_top10.json
