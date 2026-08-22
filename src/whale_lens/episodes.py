@@ -79,6 +79,7 @@ class Episode:
     fees_usdc: Decimal
     net_pnl: Decimal
     duration_ms: int
+    entry_notional_usd: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -116,8 +117,25 @@ def _new_active(coin: str, position: Decimal, entry_time_ms: int | None, qualify
         "qualifying": qualifying,
         "gross_closed_pnl": Decimal("0"),
         "fees_usdc": Decimal("0"),
+        "entry_notional_usd": Decimal("0"),
+        "entry_notional_complete": True,
         "unpriced_fee_tokens": set(),
     }
+
+
+def _add_entry_notional(active: dict[str, Any], fill: Mapping[str, Any], opened_size: Decimal) -> None:
+    if opened_size <= 0:
+        active["entry_notional_complete"] = False
+        return
+    try:
+        price = _decimal(fill.get("px"), "px")
+    except ValueError:
+        active["entry_notional_complete"] = False
+        return
+    if price <= 0:
+        active["entry_notional_complete"] = False
+        return
+    active["entry_notional_usd"] += opened_size * price
 
 
 def _add_fee(active: dict[str, Any], fill: Mapping[str, Any], fraction: Decimal = Decimal("1")) -> None:
@@ -154,6 +172,11 @@ def _finish_episode(active: dict[str, Any], exit_time_ms: int) -> tuple[Episode 
             fees_usdc=fees,
             net_pnl=gross - fees,
             duration_ms=exit_time_ms - int(entry_time_ms),
+            entry_notional_usd=(
+                active["entry_notional_usd"]
+                if active["entry_notional_complete"] and active["entry_notional_usd"] > 0
+                else None
+            ),
         ),
         None,
     )
@@ -255,6 +278,7 @@ def reconstruct_completed_episodes(
                     active = _new_active(coin, end_position, timestamp, qualifying=True)
                     active["gross_closed_pnl"] += closed_pnl
                     try:
+                        _add_entry_notional(active, fill, abs(end_position))
                         _add_fee(active, fill)
                     except ValueError as exc:
                         return _failure(completed, raw_fill_count, REASON_INVALID_FILL, str(exc))
@@ -267,6 +291,8 @@ def reconstruct_completed_episodes(
                 if end_position == 0 or _sign(start_position) == _sign(end_position):
                     active["gross_closed_pnl"] += closed_pnl
                     try:
+                        if end_position != 0 and abs(end_position) > abs(start_position):
+                            _add_entry_notional(active, fill, abs(end_position) - abs(start_position))
                         _add_fee(active, fill)
                     except ValueError as exc:
                         return _failure(completed, raw_fill_count, REASON_INVALID_FILL, str(exc))
@@ -304,6 +330,7 @@ def reconstruct_completed_episodes(
                         completed.append(episode)
                     active = _new_active(coin, end_position, timestamp, qualifying=True)
                     try:
+                        _add_entry_notional(active, fill, abs(end_position))
                         _add_fee(active, fill, new_fraction)
                     except ValueError as exc:
                         return _failure(completed, raw_fill_count, REASON_INVALID_FILL, str(exc))

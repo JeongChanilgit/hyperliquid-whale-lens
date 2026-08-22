@@ -37,9 +37,46 @@ class ActivityAnalysisTests(unittest.TestCase):
             availability_limit_reached=False,
         )
         self.assertTrue(summary["episode_validation_valid_90d"])
+        self.assertEqual(summary["verified_started_episodes_90d"], 1)
         self.assertEqual(summary["verified_completed_episodes_90d"], 1)
+        self.assertEqual(summary["verified_open_started_episodes_90d"], 0)
         self.assertEqual(summary["episode_net_pnl_usd"], "8")
+        self.assertEqual(summary["episode_entry_notional_usd"], "100")
+        self.assertEqual(summary["episode_net_return_on_entry_notional"], "0.08")
+        self.assertEqual(summary["median_episode_return_on_entry_notional"], "0.08")
         self.assertEqual(summary["taker_fill_ratio"], 0.5)
+
+    def test_fill_summary_counts_additions_in_entry_notional(self) -> None:
+        fills = [
+            {"time": 10, "coin": "BTC", "side": "B", "sz": "1", "px": "100", "startPosition": "0", "closedPnl": "0", "fee": "0", "feeToken": "USDC"},
+            {"time": 11, "coin": "BTC", "side": "B", "sz": "1", "px": "120", "startPosition": "1", "closedPnl": "0", "fee": "0", "feeToken": "USDC"},
+            {"time": 20, "coin": "BTC", "side": "A", "sz": "2", "px": "130", "startPosition": "2", "closedPnl": "40", "fee": "0", "feeToken": "USDC"},
+        ]
+        summary = summarize_fill_history(
+            fills,
+            window_start_ms=0,
+            window_end_ms=30,
+            coverage_complete=True,
+            availability_limit_reached=False,
+        )
+        self.assertEqual(summary["verified_completed_episodes_90d"], 1)
+        self.assertEqual(summary["episode_entry_notional_usd"], "220")
+        self.assertAlmostEqual(float(summary["episode_net_return_on_entry_notional"]), 40 / 220)
+
+    def test_fill_summary_counts_new_but_still_open_episode(self) -> None:
+        fills = [
+            {"time": 10, "coin": "ETH", "side": "A", "sz": "2", "px": "50", "startPosition": "0", "closedPnl": "0", "fee": "0", "feeToken": "USDC"},
+        ]
+        summary = summarize_fill_history(
+            fills,
+            window_start_ms=0,
+            window_end_ms=30,
+            coverage_complete=True,
+            availability_limit_reached=False,
+        )
+        self.assertEqual(summary["verified_started_episodes_90d"], 1)
+        self.assertEqual(summary["verified_completed_episodes_90d"], 0)
+        self.assertEqual(summary["verified_open_started_episodes_90d"], 1)
 
     def test_current_position_summary_qualifies_hip3_coin(self) -> None:
         payload = {

@@ -1,0 +1,1568 @@
+{
+  "created_at_utc": "2026-08-22T03:04:35.899000+00:00",
+  "episode_validation_invalid_wallet_count": 3,
+  "episode_validation_valid_wallet_count": 7,
+  "fill_history_complete_wallet_count": 9,
+  "fill_history_incomplete_wallet_count": 1,
+  "fill_history_status": "PARTIAL",
+  "request_budget": {
+    "fills": {
+      "limit": 250,
+      "remaining": 250,
+      "used": 0
+    }
+  },
+  "run_id": "twr-filled-top10-90d-1787298809183-generated-1787367875899",
+  "selection_metric": "perp_cashflow_neutral_twr_30d",
+  "selection_rule": "현재 SIMULATION 전용 trade-qualified TWR TOP10의 저장 순서를 그대로 사용",
+  "selection_source": "state\\perp-twr-trade-qualified\\latest_active_top10.json",
+  "source_candidate_count": null,
+  "source_candidate_pool_hash": "2695de495f168dbe8634497b3534c5bdcc00afe32bec8c5748f7768e8d62f614",
+  "source_run_id": "perp-twr-20260821-final-v4-full7000",
+  "wallet_count": 10,
+  "wallets": [
+    {
+      "activity_rank": 1,
+      "candidate_rank": 1,
+      "completed_episodes_30d": null,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 1,
+        "open_position_notional_usd": "1573400.9023200001",
+        "open_position_unrealized_pnl_usd": "64401.582816",
+        "perp_account_value_usd": "64418.743496",
+        "positions": [
+          {
+            "coin": "BTC",
+            "dex": "default",
+            "entry_price": "75400.0",
+            "leverage": 40,
+            "leverage_type": "cross",
+            "liquidation_price": "76353.4503868312",
+            "position_value_usd": "1573400.9023200001",
+            "side": "LONG",
+            "size": "20.01324",
+            "unrealized_pnl_usd": "64401.582816"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": false,
+      "fill_analysis_90d": {
+        "active_days_90d": 41,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {
+          "#900": 1,
+          "BTC": 10,
+          "HYPE": 4,
+          "xyz:SP500": 4
+        },
+        "episode_direction_counts": {
+          "LONG": 18,
+          "SHORT": 1
+        },
+        "episode_entry_notional_coverage_complete": true,
+        "episode_entry_notional_usd": "535967.358980",
+        "episode_fees_usdc": "416.0284930000000000000000000",
+        "episode_losses": 11,
+        "episode_net_pnl_usd": "-2791.543973000000000000000000",
+        "episode_net_return_on_entry_notional": "-0.005208421606704912102929197675",
+        "episode_validation_message_90d": null,
+        "episode_validation_reason_90d": null,
+        "episode_validation_valid_90d": true,
+        "episode_win_rate": 0.42105263157894735,
+        "episode_wins": 8,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Buy": 1,
+          "Close Long": 44,
+          "Close Short": 1,
+          "Long > Short": 1,
+          "Open Long": 370,
+          "Open Short": 20,
+          "Sell": 9,
+          "Settlement": 1
+        },
+        "first_fill_ms": 1779622847785,
+        "last_fill_ms": 1787278037120,
+        "median_episode_duration_ms": 175387185,
+        "median_episode_return_on_entry_notional": "-0.002195362950994831842240722402",
+        "observed_notional_usd": "2015537.978940",
+        "pages_fetched": 1,
+        "raw_fill_count_90d": 447,
+        "recent_completed_episodes": [
+          {
+            "coin": "HYPE",
+            "direction": "LONG",
+            "duration_ms": 269291063,
+            "entry_notional_usd": "2584.78484",
+            "entry_time_ms": 1786711146558,
+            "exit_time_ms": 1786980437621,
+            "net_pnl_usd": "99.444617",
+            "return_on_entry_notional": "0.03847307344931657831914551155"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 319893535,
+            "entry_notional_usd": "15156.138970",
+            "entry_time_ms": 1786376530012,
+            "exit_time_ms": 1786696423547,
+            "net_pnl_usd": "-398.300729",
+            "return_on_entry_notional": "-0.02627982824572899782536105896"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 608143981,
+            "entry_notional_usd": "48139.410590",
+            "entry_time_ms": 1785766961645,
+            "exit_time_ms": 1786375105626,
+            "net_pnl_usd": "247.861867",
+            "return_on_entry_notional": "0.005148834685804988789331996680"
+          },
+          {
+            "coin": "xyz:SP500",
+            "direction": "LONG",
+            "duration_ms": 258833992,
+            "entry_notional_usd": "18413.8738",
+            "entry_time_ms": 1785508121273,
+            "exit_time_ms": 1785766955265,
+            "net_pnl_usd": "207.673396",
+            "return_on_entry_notional": "0.01127809380337992758481922473"
+          },
+          {
+            "coin": "xyz:SP500",
+            "direction": "LONG",
+            "duration_ms": 145153321,
+            "entry_notional_usd": "16291.3351",
+            "entry_time_ms": 1785361777342,
+            "exit_time_ms": 1785506930663,
+            "net_pnl_usd": "49.402070",
+            "return_on_entry_notional": "0.003032413838200406300647514150"
+          },
+          {
+            "coin": "xyz:SP500",
+            "direction": "LONG",
+            "duration_ms": 9157221,
+            "entry_notional_usd": "11145.2987",
+            "entry_time_ms": 1785344007411,
+            "exit_time_ms": 1785353164632,
+            "net_pnl_usd": "-32.351280",
+            "return_on_entry_notional": "-0.002902683981004475007924193185"
+          },
+          {
+            "coin": "xyz:SP500",
+            "direction": "LONG",
+            "duration_ms": 175387185,
+            "entry_notional_usd": "14383.1795",
+            "entry_time_ms": 1785165195331,
+            "exit_time_ms": 1785340582516,
+            "net_pnl_usd": "-130.483860",
+            "return_on_entry_notional": "-0.009071976053695220865456069710"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 262398887,
+            "entry_notional_usd": "25253.449310",
+            "entry_time_ms": 1784900226939,
+            "exit_time_ms": 1785162625826,
+            "net_pnl_usd": "-55.440487",
+            "return_on_entry_notional": "-0.002195362950994831842240722402"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 95342480,
+            "entry_notional_usd": "28489.790560",
+            "entry_time_ms": 1784804525664,
+            "exit_time_ms": 1784899868144,
+            "net_pnl_usd": "-620.957370",
+            "return_on_entry_notional": "-0.02179578571110422371599210521"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 481968984,
+            "entry_notional_usd": "88715.009190",
+            "entry_time_ms": 1784308723615,
+            "exit_time_ms": 1784790692599,
+            "net_pnl_usd": "89.743675",
+            "return_on_entry_notional": "0.001011595172219358251751086811"
+          }
+        ],
+        "taker_fill_ratio": 1.0,
+        "top_coins_by_notional": [
+          {
+            "coin": "BTC",
+            "fill_count": 360,
+            "notional_usd": "1867062.733020"
+          },
+          {
+            "coin": "xyz:SP500",
+            "fill_count": 51,
+            "notional_usd": "120571.9198"
+          },
+          {
+            "coin": "HYPE",
+            "fill_count": 25,
+            "notional_usd": "24587.02875"
+          },
+          {
+            "coin": "@107",
+            "fill_count": 9,
+            "notional_usd": "3251.54119"
+          },
+          {
+            "coin": "#900",
+            "fill_count": 2,
+            "notional_usd": "64.756180"
+          }
+        ],
+        "verified_completed_episodes_90d": 19,
+        "verified_open_started_episodes_90d": 1,
+        "verified_started_episodes_90d": 20
+      },
+      "perp_cashflow_neutral_twr_30d": "2.505718486392190655376700586",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0x47ce96e23777794066fbec779bd22c6b36ea1c08"
+    },
+    {
+      "activity_rank": 2,
+      "candidate_rank": 2,
+      "completed_episodes_30d": 0,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 1,
+        "open_position_notional_usd": "133345.5935",
+        "open_position_unrealized_pnl_usd": "33428.9935",
+        "perp_account_value_usd": "38296.175936",
+        "positions": [
+          {
+            "coin": "XRP",
+            "dex": "default",
+            "entry_price": "1.16",
+            "leverage": 20,
+            "leverage_type": "isolated",
+            "liquidation_price": "1.131788264",
+            "position_value_usd": "133345.5935",
+            "side": "LONG",
+            "size": "86135.0",
+            "unrealized_pnl_usd": "33428.9935"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": true,
+      "fill_analysis_90d": {
+        "active_days_90d": 2,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {
+          "xyz:BRENTOIL": 1
+        },
+        "episode_direction_counts": {
+          "LONG": 1
+        },
+        "episode_entry_notional_coverage_complete": true,
+        "episode_entry_notional_usd": "22.32656",
+        "episode_fees_usdc": "0.003807",
+        "episode_losses": 1,
+        "episode_net_pnl_usd": "-0.590997",
+        "episode_net_return_on_entry_notional": "-0.02647058033122881447029905189",
+        "episode_validation_message_90d": null,
+        "episode_validation_reason_90d": null,
+        "episode_validation_valid_90d": true,
+        "episode_win_rate": 0.0,
+        "episode_wins": 0,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Close Long": 1,
+          "Open Long": 36
+        },
+        "first_fill_ms": 1780902129021,
+        "last_fill_ms": 1787216861448,
+        "median_episode_duration_ms": 15141285,
+        "median_episode_return_on_entry_notional": "-0.02647058033122881447029905189",
+        "observed_notional_usd": "99960.66593",
+        "pages_fetched": 1,
+        "raw_fill_count_90d": 37,
+        "recent_completed_episodes": [
+          {
+            "coin": "xyz:BRENTOIL",
+            "direction": "LONG",
+            "duration_ms": 15141285,
+            "entry_notional_usd": "22.32656",
+            "entry_time_ms": 1780902129021,
+            "exit_time_ms": 1780917270306,
+            "net_pnl_usd": "-0.590997",
+            "return_on_entry_notional": "-0.02647058033122881447029905189"
+          }
+        ],
+        "taker_fill_ratio": 0.05405405405405406,
+        "top_coins_by_notional": [
+          {
+            "coin": "XRP",
+            "fill_count": 35,
+            "notional_usd": "99916.600"
+          },
+          {
+            "coin": "xyz:BRENTOIL",
+            "fill_count": 2,
+            "notional_usd": "44.06593"
+          }
+        ],
+        "verified_completed_episodes_90d": 1,
+        "verified_open_started_episodes_90d": 1,
+        "verified_started_episodes_90d": 2
+      },
+      "perp_cashflow_neutral_twr_30d": "1.758657763730458591808953832",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0x7933481da364d5cc3151c22154a0295703765ac9"
+    },
+    {
+      "activity_rank": 3,
+      "candidate_rank": 3,
+      "completed_episodes_30d": null,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 2,
+        "open_position_notional_usd": "1049820.16388",
+        "open_position_unrealized_pnl_usd": "128639.327232",
+        "perp_account_value_usd": "283567.955347",
+        "positions": [
+          {
+            "coin": "xyz:SMSN",
+            "dex": "xyz",
+            "entry_price": "146.302",
+            "leverage": 10,
+            "leverage_type": "isolated",
+            "liquidation_price": "143.7853853594",
+            "position_value_usd": "574329.50388",
+            "side": "LONG",
+            "size": "2955.282",
+            "unrealized_pnl_usd": "141963.098792"
+          },
+          {
+            "coin": "xyz:SHAZ",
+            "dex": "xyz",
+            "entry_price": "61.3029",
+            "leverage": 10,
+            "leverage_type": "isolated",
+            "liquidation_price": "47.8639173443",
+            "position_value_usd": "475490.66",
+            "side": "LONG",
+            "size": "7973.75",
+            "unrealized_pnl_usd": "-13323.77156"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": false,
+      "fill_analysis_90d": {
+        "active_days_90d": 5,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {},
+        "episode_direction_counts": {},
+        "episode_entry_notional_coverage_complete": false,
+        "episode_entry_notional_usd": null,
+        "episode_fees_usdc": null,
+        "episode_losses": null,
+        "episode_net_pnl_usd": null,
+        "episode_net_return_on_entry_notional": null,
+        "episode_validation_message_90d": "position discontinuity for xyz:CXMT: expected -2910.3, got -3701.2",
+        "episode_validation_reason_90d": "POSITION_CHAIN_DISCONTINUITY",
+        "episode_validation_valid_90d": false,
+        "episode_win_rate": null,
+        "episode_wins": null,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Close Long": 34,
+          "Close Short": 27,
+          "Open Long": 167,
+          "Open Short": 86
+        },
+        "first_fill_ms": 1784125580010,
+        "last_fill_ms": 1786540316669,
+        "median_episode_duration_ms": null,
+        "median_episode_return_on_entry_notional": null,
+        "observed_notional_usd": "1696491.41598",
+        "pages_fetched": 1,
+        "raw_fill_count_90d": 314,
+        "recent_completed_episodes": [],
+        "taker_fill_ratio": 0.5573248407643312,
+        "top_coins_by_notional": [
+          {
+            "coin": "xyz:SMSN",
+            "fill_count": 191,
+            "notional_usd": "797908.06365"
+          },
+          {
+            "coin": "xyz:CXMT",
+            "fill_count": 113,
+            "notional_usd": "777819.30208"
+          },
+          {
+            "coin": "xyz:SHAZ",
+            "fill_count": 10,
+            "notional_usd": "120764.05025"
+          }
+        ],
+        "verified_completed_episodes_90d": null,
+        "verified_open_started_episodes_90d": null,
+        "verified_started_episodes_90d": null
+      },
+      "perp_cashflow_neutral_twr_30d": "1.658375688558897884295689437",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0x1bb2a56618ef9a4f71ee90690dd8d130572b0d38"
+    },
+    {
+      "activity_rank": 4,
+      "candidate_rank": 4,
+      "completed_episodes_30d": null,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 2,
+        "open_position_notional_usd": "200532.47310",
+        "open_position_unrealized_pnl_usd": "48852.033217",
+        "perp_account_value_usd": "72895.347995",
+        "positions": [
+          {
+            "coin": "HYPE",
+            "dex": "default",
+            "entry_price": "57.1336",
+            "leverage": 10,
+            "leverage_type": "cross",
+            "liquidation_price": "49.30057521",
+            "position_value_usd": "171971.96058",
+            "side": "LONG",
+            "size": "2130.66",
+            "unrealized_pnl_usd": "50239.493971"
+          },
+          {
+            "coin": "SOL",
+            "dex": "default",
+            "entry_price": "91.4086",
+            "leverage": 20,
+            "leverage_type": "cross",
+            "liquidation_price": "304.7480445583",
+            "position_value_usd": "28560.51252",
+            "side": "SHORT",
+            "size": "-297.27",
+            "unrealized_pnl_usd": "-1387.460754"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": false,
+      "fill_analysis_90d": {
+        "active_days_90d": 55,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {
+          "SOL": 7
+        },
+        "episode_direction_counts": {
+          "LONG": 1,
+          "SHORT": 6
+        },
+        "episode_entry_notional_coverage_complete": false,
+        "episode_entry_notional_usd": null,
+        "episode_fees_usdc": null,
+        "episode_losses": null,
+        "episode_net_pnl_usd": null,
+        "episode_net_return_on_entry_notional": null,
+        "episode_validation_message_90d": "position discontinuity for SOL: expected 0, got 685.53",
+        "episode_validation_reason_90d": "POSITION_CHAIN_DISCONTINUITY",
+        "episode_validation_valid_90d": false,
+        "episode_win_rate": null,
+        "episode_wins": null,
+        "episodes_observed_before_failure": 7,
+        "fill_direction_counts": {
+          "Close Long": 1145,
+          "Close Short": 754,
+          "Long > Short": 13,
+          "Open Long": 643,
+          "Open Short": 594,
+          "Short > Long": 10
+        },
+        "first_fill_ms": 1779551287716,
+        "last_fill_ms": 1787185216901,
+        "median_episode_duration_ms": null,
+        "median_episode_return_on_entry_notional": null,
+        "observed_notional_usd": "11415485.8399060",
+        "pages_fetched": 2,
+        "raw_fill_count_90d": 3159,
+        "recent_completed_episodes": [
+          {
+            "coin": "SOL",
+            "direction": "SHORT",
+            "duration_ms": 39602145,
+            "entry_notional_usd": "96597.82651",
+            "entry_time_ms": 1780535098202,
+            "exit_time_ms": 1780574700347,
+            "net_pnl_usd": "2352.582260433797498229879632",
+            "return_on_entry_notional": "0.02435440159919388540525744415"
+          },
+          {
+            "coin": "SOL",
+            "direction": "LONG",
+            "duration_ms": 1453235,
+            "entry_notional_usd": "96335.27791",
+            "entry_time_ms": 1780533644967,
+            "exit_time_ms": 1780535098202,
+            "net_pnl_usd": "180.8892451344035749133002609",
+            "return_on_entry_notional": "0.001877705125877116753036626610"
+          },
+          {
+            "coin": "SOL",
+            "direction": "SHORT",
+            "duration_ms": 22900022,
+            "entry_notional_usd": "99354.74756",
+            "entry_time_ms": 1780510744945,
+            "exit_time_ms": 1780533644967,
+            "net_pnl_usd": "2940.635793431798926856820107",
+            "return_on_entry_notional": "0.02959733546357167078546014985"
+          },
+          {
+            "coin": "SOL",
+            "direction": "SHORT",
+            "duration_ms": 17324005,
+            "entry_notional_usd": "77624.99125",
+            "entry_time_ms": 1780445985115,
+            "exit_time_ms": 1780463309120,
+            "net_pnl_usd": "266.120185",
+            "return_on_entry_notional": "0.003428279742318167411065569685"
+          },
+          {
+            "coin": "SOL",
+            "direction": "SHORT",
+            "duration_ms": 1151978,
+            "entry_notional_usd": "105771.41088",
+            "entry_time_ms": 1780442081894,
+            "exit_time_ms": 1780443233872,
+            "net_pnl_usd": "424.107025",
+            "return_on_entry_notional": "0.004009656498589763351372627545"
+          },
+          {
+            "coin": "SOL",
+            "direction": "SHORT",
+            "duration_ms": 5766330,
+            "entry_notional_usd": "22944.81343",
+            "entry_time_ms": 1779760628781,
+            "exit_time_ms": 1779766395111,
+            "net_pnl_usd": "3.079155",
+            "return_on_entry_notional": "0.0001341983019122766517086471685"
+          },
+          {
+            "coin": "SOL",
+            "direction": "SHORT",
+            "duration_ms": 78361978,
+            "entry_notional_usd": "65644.92221",
+            "entry_time_ms": 1779582201690,
+            "exit_time_ms": 1779660563668,
+            "net_pnl_usd": "192.416049",
+            "return_on_entry_notional": "0.002931164247319168237612875374"
+          }
+        ],
+        "taker_fill_ratio": 0.9791073124406457,
+        "top_coins_by_notional": [
+          {
+            "coin": "SOL",
+            "fill_count": 1156,
+            "notional_usd": "6219549.14343"
+          },
+          {
+            "coin": "HYPE",
+            "fill_count": 902,
+            "notional_usd": "2101933.38850"
+          },
+          {
+            "coin": "ETH",
+            "fill_count": 113,
+            "notional_usd": "947406.42889"
+          },
+          {
+            "coin": "BTC",
+            "fill_count": 80,
+            "notional_usd": "934342.024370"
+          },
+          {
+            "coin": "ZEC",
+            "fill_count": 268,
+            "notional_usd": "572966.4309"
+          }
+        ],
+        "verified_completed_episodes_90d": null,
+        "verified_open_started_episodes_90d": null,
+        "verified_started_episodes_90d": null
+      },
+      "perp_cashflow_neutral_twr_30d": "1.328643311922966588087721918",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0xa45ee34298f8e5596fef0870a42f80182de0cfb9"
+    },
+    {
+      "activity_rank": 5,
+      "candidate_rank": 5,
+      "completed_episodes_30d": 0,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 2,
+        "open_position_notional_usd": "103813000.0",
+        "open_position_unrealized_pnl_usd": "23839864.0848400006",
+        "perp_account_value_usd": "25671672.5636969991",
+        "positions": [
+          {
+            "coin": "BTC",
+            "dex": "default",
+            "entry_price": "62353.6",
+            "leverage": 40,
+            "leverage_type": "cross",
+            "liquidation_price": "51907.4602835797",
+            "position_value_usd": "78618000.0",
+            "side": "LONG",
+            "size": "1000.0",
+            "unrealized_pnl_usd": "16264345.1188200004"
+          },
+          {
+            "coin": "ETH",
+            "dex": "default",
+            "entry_price": "1761.94",
+            "leverage": 20,
+            "leverage_type": "cross",
+            "liquidation_price": null,
+            "position_value_usd": "25195000.0",
+            "side": "LONG",
+            "size": "10000.0",
+            "unrealized_pnl_usd": "7575518.9660200002"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": true,
+      "fill_analysis_90d": {
+        "active_days_90d": 7,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {},
+        "episode_direction_counts": {},
+        "episode_entry_notional_coverage_complete": true,
+        "episode_entry_notional_usd": "0",
+        "episode_fees_usdc": "0",
+        "episode_losses": 0,
+        "episode_net_pnl_usd": "0",
+        "episode_net_return_on_entry_notional": null,
+        "episode_validation_message_90d": null,
+        "episode_validation_reason_90d": null,
+        "episode_validation_valid_90d": true,
+        "episode_win_rate": null,
+        "episode_wins": 0,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Buy": 418,
+          "Open Long": 3051,
+          "Sell": 396,
+          "Spot Dust Conversion": 1
+        },
+        "first_fill_ms": 1783336798589,
+        "last_fill_ms": 1784937600066,
+        "median_episode_duration_ms": null,
+        "median_episode_return_on_entry_notional": null,
+        "observed_notional_usd": "84409623.4076026072",
+        "pages_fetched": 2,
+        "raw_fill_count_90d": 3866,
+        "recent_completed_episodes": [],
+        "taker_fill_ratio": 0.9723228142783239,
+        "top_coins_by_notional": [
+          {
+            "coin": "BTC",
+            "fill_count": 2425,
+            "notional_usd": "62353654.881180"
+          },
+          {
+            "coin": "ETH",
+            "fill_count": 626,
+            "notional_usd": "17619481.03398"
+          },
+          {
+            "coin": "@151",
+            "fill_count": 815,
+            "notional_usd": "4436487.4924426072"
+          }
+        ],
+        "verified_completed_episodes_90d": 0,
+        "verified_open_started_episodes_90d": 2,
+        "verified_started_episodes_90d": 2
+      },
+      "perp_cashflow_neutral_twr_30d": "1.170116936572268219623196041",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0x15a4f009bb324a3fb9e36137136b201e3fe0dfdb"
+    },
+    {
+      "activity_rank": 6,
+      "candidate_rank": 6,
+      "completed_episodes_30d": null,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 1,
+        "open_position_notional_usd": "2751.63",
+        "open_position_unrealized_pnl_usd": "-123.200605",
+        "perp_account_value_usd": "65.787926",
+        "positions": [
+          {
+            "coin": "BTC",
+            "dex": "default",
+            "entry_price": "75097.9",
+            "leverage": 40,
+            "leverage_type": "cross",
+            "liquidation_price": "79503.8568183421",
+            "position_value_usd": "2751.63",
+            "side": "SHORT",
+            "size": "-0.035",
+            "unrealized_pnl_usd": "-123.200605"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": false,
+      "fill_analysis_90d": {
+        "active_days_90d": 62,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {
+          "BTC": 8,
+          "CRV": 3,
+          "ETH": 2
+        },
+        "episode_direction_counts": {
+          "LONG": 12,
+          "SHORT": 1
+        },
+        "episode_entry_notional_coverage_complete": true,
+        "episode_entry_notional_usd": "1440664.894286",
+        "episode_fees_usdc": "1300.441200",
+        "episode_losses": 10,
+        "episode_net_pnl_usd": "7205.348350",
+        "episode_net_return_on_entry_notional": "0.005001404822577427378294161286",
+        "episode_validation_message_90d": null,
+        "episode_validation_reason_90d": null,
+        "episode_validation_valid_90d": true,
+        "episode_win_rate": 0.23076923076923078,
+        "episode_wins": 3,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Close Long": 508,
+          "Close Short": 62,
+          "Open Long": 489,
+          "Open Short": 73
+        },
+        "first_fill_ms": 1779525561548,
+        "last_fill_ms": 1787296536268,
+        "median_episode_duration_ms": 325985825,
+        "median_episode_return_on_entry_notional": "-0.01482098979445876270582784050",
+        "observed_notional_usd": "4650551.882738",
+        "pages_fetched": 1,
+        "raw_fill_count_90d": 1132,
+        "recent_completed_episodes": [
+          {
+            "coin": "CRV",
+            "direction": "LONG",
+            "duration_ms": 526761399,
+            "entry_notional_usd": "17186.298007",
+            "entry_time_ms": 1786720031940,
+            "exit_time_ms": 1787246793339,
+            "net_pnl_usd": "1686.710910",
+            "return_on_entry_notional": "0.09814277102101922140840717705"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 199941863,
+            "entry_notional_usd": "262486.940970",
+            "entry_time_ms": 1787045674549,
+            "exit_time_ms": 1787245616412,
+            "net_pnl_usd": "17799.973267",
+            "return_on_entry_notional": "0.06781279556697787821379402012"
+          },
+          {
+            "coin": "ETH",
+            "direction": "LONG",
+            "duration_ms": 325985825,
+            "entry_notional_usd": "37348.00000",
+            "entry_time_ms": 1786719678962,
+            "exit_time_ms": 1787045664787,
+            "net_pnl_usd": "536.130303",
+            "return_on_entry_notional": "0.01435499365427867623433651066"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 5520371247,
+            "entry_notional_usd": "417750.224580",
+            "entry_time_ms": 1781199008885,
+            "exit_time_ms": 1786719380132,
+            "net_pnl_usd": "-2381.380892",
+            "return_on_entry_notional": "-0.005700489794815085291270246048"
+          },
+          {
+            "coin": "CRV",
+            "direction": "LONG",
+            "duration_ms": 2707590541,
+            "entry_notional_usd": "120120.459853",
+            "entry_time_ms": 1784011789591,
+            "exit_time_ms": 1786719380132,
+            "net_pnl_usd": "-1890.794900",
+            "return_on_entry_notional": "-0.01574082302310448182096837481"
+          },
+          {
+            "coin": "ETH",
+            "direction": "LONG",
+            "duration_ms": 199705806,
+            "entry_notional_usd": "47263.42766",
+            "entry_time_ms": 1786519674326,
+            "exit_time_ms": 1786719380132,
+            "net_pnl_usd": "-700.490779",
+            "return_on_entry_notional": "-0.01482098979445876270582784050"
+          },
+          {
+            "coin": "CRV",
+            "direction": "LONG",
+            "duration_ms": 107626822,
+            "entry_notional_usd": "15933.996966",
+            "entry_time_ms": 1783804673698,
+            "exit_time_ms": 1783912300520,
+            "net_pnl_usd": "-841.734680",
+            "return_on_entry_notional": "-0.05282633615382853588024211502"
+          },
+          {
+            "coin": "BTC",
+            "direction": "SHORT",
+            "duration_ms": 8132433,
+            "entry_notional_usd": "24612.577200",
+            "entry_time_ms": 1781190849663,
+            "exit_time_ms": 1781198982096,
+            "net_pnl_usd": "-41.430231",
+            "return_on_entry_notional": "-0.001683295116287131442699954233"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 551231506,
+            "entry_notional_usd": "183820.155900",
+            "entry_time_ms": 1780639580997,
+            "exit_time_ms": 1781190812503,
+            "net_pnl_usd": "-691.857890",
+            "return_on_entry_notional": "-0.003763775994055720415151709704"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 72623609,
+            "entry_notional_usd": "12107.070200",
+            "entry_time_ms": 1780555889852,
+            "exit_time_ms": 1780628513461,
+            "net_pnl_usd": "-239.544484",
+            "return_on_entry_notional": "-0.01978550384551334310426316022"
+          }
+        ],
+        "taker_fill_ratio": 1.0,
+        "top_coins_by_notional": [
+          {
+            "coin": "BTC",
+            "fill_count": 715,
+            "notional_usd": "4175847.087420"
+          },
+          {
+            "coin": "CRV",
+            "fill_count": 380,
+            "notional_usd": "305570.367658"
+          },
+          {
+            "coin": "ETH",
+            "fill_count": 37,
+            "notional_usd": "169134.42766"
+          }
+        ],
+        "verified_completed_episodes_90d": 13,
+        "verified_open_started_episodes_90d": 1,
+        "verified_started_episodes_90d": 14
+      },
+      "perp_cashflow_neutral_twr_30d": "1.135911316901334147712376097",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0xf30b0bcd7b90f29960a5dd1b38fd953f22939e83"
+    },
+    {
+      "activity_rank": 7,
+      "candidate_rank": 7,
+      "completed_episodes_30d": null,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 1,
+        "open_position_notional_usd": "211918.67624",
+        "open_position_unrealized_pnl_usd": "59.81134",
+        "perp_account_value_usd": "12133.127611",
+        "positions": [
+          {
+            "coin": "SOL",
+            "dex": "default",
+            "entry_price": "96.0488",
+            "leverage": 20,
+            "leverage_type": "cross",
+            "liquidation_price": "92.8977372692",
+            "position_value_usd": "211918.67624",
+            "side": "LONG",
+            "size": "2205.74",
+            "unrealized_pnl_usd": "59.81134"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": false,
+      "fill_analysis_90d": {
+        "active_days_90d": 20,
+        "availability_limit_reached": true,
+        "coverage_complete": false,
+        "coverage_message_90d": "The 10,000-fill API availability limit was reached",
+        "episode_coin_counts": {},
+        "episode_direction_counts": {},
+        "episode_entry_notional_coverage_complete": false,
+        "episode_entry_notional_usd": null,
+        "episode_fees_usdc": null,
+        "episode_losses": null,
+        "episode_net_pnl_usd": null,
+        "episode_net_return_on_entry_notional": null,
+        "episode_validation_message_90d": "the 10,000 raw-fill availability limit prevents complete window validation",
+        "episode_validation_reason_90d": "FILL_10000_LIMIT",
+        "episode_validation_valid_90d": false,
+        "episode_win_rate": null,
+        "episode_wins": null,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Close Long": 2479,
+          "Close Short": 1792,
+          "Long > Short": 3,
+          "Open Long": 3282,
+          "Open Short": 2442,
+          "Short > Long": 2
+        },
+        "first_fill_ms": 1780261171861,
+        "last_fill_ms": 1782186635340,
+        "median_episode_duration_ms": null,
+        "median_episode_return_on_entry_notional": null,
+        "observed_notional_usd": "140417455.011640",
+        "pages_fetched": 6,
+        "raw_fill_count_90d": 10000,
+        "recent_completed_episodes": [],
+        "taker_fill_ratio": 0.8926,
+        "top_coins_by_notional": [
+          {
+            "coin": "BTC",
+            "fill_count": 4713,
+            "notional_usd": "104953877.501430"
+          },
+          {
+            "coin": "SOL",
+            "fill_count": 1329,
+            "notional_usd": "15276804.21008"
+          },
+          {
+            "coin": "HYPE",
+            "fill_count": 2852,
+            "notional_usd": "13079552.16493"
+          },
+          {
+            "coin": "ZEC",
+            "fill_count": 891,
+            "notional_usd": "6612759.2903"
+          },
+          {
+            "coin": "NEAR",
+            "fill_count": 64,
+            "notional_usd": "298801.90750"
+          }
+        ],
+        "verified_completed_episodes_90d": null,
+        "verified_open_started_episodes_90d": null,
+        "verified_started_episodes_90d": null
+      },
+      "perp_cashflow_neutral_twr_30d": "1.065375117267182104938455875",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0xbe813fca7d5f06624eda2570807a1407e4738b12"
+    },
+    {
+      "activity_rank": 8,
+      "candidate_rank": 8,
+      "completed_episodes_30d": null,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 2,
+        "open_position_notional_usd": "860946.72246",
+        "open_position_unrealized_pnl_usd": "158606.44261",
+        "perp_account_value_usd": "106231.333337",
+        "positions": [
+          {
+            "coin": "BTC",
+            "dex": "default",
+            "entry_price": "64395.9",
+            "leverage": 40,
+            "leverage_type": "cross",
+            "liquidation_price": "58092.3547862302",
+            "position_value_usd": "735388.8411",
+            "side": "LONG",
+            "size": "9.35395",
+            "unrealized_pnl_usd": "133032.49927"
+          },
+          {
+            "coin": "SOL",
+            "dex": "default",
+            "entry_price": "76.507",
+            "leverage": 20,
+            "leverage_type": "cross",
+            "liquidation_price": null,
+            "position_value_usd": "125557.88136",
+            "side": "LONG",
+            "size": "1306.86",
+            "unrealized_pnl_usd": "25573.94334"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": false,
+      "fill_analysis_90d": {
+        "active_days_90d": 20,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {
+          "BTC": 38,
+          "ETH": 5,
+          "SOL": 3
+        },
+        "episode_direction_counts": {
+          "LONG": 29,
+          "SHORT": 17
+        },
+        "episode_entry_notional_coverage_complete": true,
+        "episode_entry_notional_usd": "15436278.943400",
+        "episode_fees_usdc": "7997.800189000000000000000000",
+        "episode_losses": 36,
+        "episode_net_pnl_usd": "-44715.26966500000000000000000",
+        "episode_net_return_on_entry_notional": "-0.002896764811581656974165975151",
+        "episode_validation_message_90d": null,
+        "episode_validation_reason_90d": null,
+        "episode_validation_valid_90d": true,
+        "episode_win_rate": 0.21739130434782608,
+        "episode_wins": 10,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Close Long": 866,
+          "Close Short": 531,
+          "Long > Short": 1,
+          "Open Long": 733,
+          "Open Short": 519,
+          "Short > Long": 2
+        },
+        "first_fill_ms": 1782512305673,
+        "last_fill_ms": 1785474927296,
+        "median_episode_duration_ms": 8823199,
+        "median_episode_return_on_entry_notional": "-0.001579717704320077230644090515",
+        "observed_notional_usd": "31571402.674400",
+        "pages_fetched": 2,
+        "raw_fill_count_90d": 2652,
+        "recent_completed_episodes": [
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 132841266,
+            "entry_notional_usd": "599915.706000",
+            "entry_time_ms": 1785332196325,
+            "exit_time_ms": 1785465037591,
+            "net_pnl_usd": "-33.399386",
+            "return_on_entry_notional": "-0.00005567346489841691192528971729"
+          },
+          {
+            "coin": "ETH",
+            "direction": "LONG",
+            "duration_ms": 1121922383,
+            "entry_notional_usd": "99999.86200",
+            "entry_time_ms": 1784211450810,
+            "exit_time_ms": 1785333373193,
+            "net_pnl_usd": "313.640389",
+            "return_on_entry_notional": "0.003136408218243341175810822619"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 425234006,
+            "entry_notional_usd": "602570.400040",
+            "entry_time_ms": 1784906055906,
+            "exit_time_ms": 1785331289912,
+            "net_pnl_usd": "498.699357",
+            "return_on_entry_notional": "0.0008276200705625354268604939488"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 1211512084,
+            "entry_notional_usd": "639987.644550",
+            "entry_time_ms": 1783686737131,
+            "exit_time_ms": 1784898249215,
+            "net_pnl_usd": "3822.557590",
+            "return_on_entry_notional": "0.005972861542800232798650518885"
+          },
+          {
+            "coin": "SOL",
+            "direction": "LONG",
+            "duration_ms": 16432520,
+            "entry_notional_usd": "99999.46544",
+            "entry_time_ms": 1784191446072,
+            "exit_time_ms": 1784207878592,
+            "net_pnl_usd": "-719.715948",
+            "return_on_entry_notional": "-0.007197197953341379381677622696"
+          },
+          {
+            "coin": "ETH",
+            "direction": "LONG",
+            "duration_ms": 7523482,
+            "entry_notional_usd": "99989.29136",
+            "entry_time_ms": 1784198183652,
+            "exit_time_ms": 1784205707134,
+            "net_pnl_usd": "-1225.896193",
+            "return_on_entry_notional": "-0.01226027483869548648034342865"
+          },
+          {
+            "coin": "SOL",
+            "direction": "LONG",
+            "duration_ms": 133131803,
+            "entry_notional_usd": "99997.69933",
+            "entry_time_ms": 1784056633295,
+            "exit_time_ms": 1784189765098,
+            "net_pnl_usd": "-2246.398489",
+            "return_on_entry_notional": "-0.02246450172405181474288624516"
+          },
+          {
+            "coin": "ETH",
+            "direction": "LONG",
+            "duration_ms": 39157161,
+            "entry_notional_usd": "99999.90567",
+            "entry_time_ms": 1784150599104,
+            "exit_time_ms": 1784189756265,
+            "net_pnl_usd": "-2376.818879",
+            "return_on_entry_notional": "-0.02376821121055363491524381555"
+          },
+          {
+            "coin": "BTC",
+            "direction": "SHORT",
+            "duration_ms": 26511789,
+            "entry_notional_usd": "399999.395100",
+            "entry_time_ms": 1783620958619,
+            "exit_time_ms": 1783647470408,
+            "net_pnl_usd": "-765.130447",
+            "return_on_entry_notional": "-0.001912829010175670638157922554"
+          },
+          {
+            "coin": "BTC",
+            "direction": "LONG",
+            "duration_ms": 6404,
+            "entry_notional_usd": "399943.031820",
+            "entry_time_ms": 1783620924871,
+            "exit_time_ms": 1783620931275,
+            "net_pnl_usd": "-345.195625",
+            "return_on_entry_notional": "-0.0008631119872976313229369467753"
+          }
+        ],
+        "taker_fill_ratio": 0.48001508295625944,
+        "top_coins_by_notional": [
+          {
+            "coin": "BTC",
+            "fill_count": 2380,
+            "notional_usd": "29483958.196500"
+          },
+          {
+            "coin": "ETH",
+            "fill_count": 158,
+            "notional_usd": "1393880.19788"
+          },
+          {
+            "coin": "SOL",
+            "fill_count": 114,
+            "notional_usd": "693564.28002"
+          }
+        ],
+        "verified_completed_episodes_90d": 46,
+        "verified_open_started_episodes_90d": 2,
+        "verified_started_episodes_90d": 48
+      },
+      "perp_cashflow_neutral_twr_30d": "1.043815588019261143067411058",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0xcecf774b031d6c1c1f8e4ec003979ee1dfabc7de"
+    },
+    {
+      "activity_rank": 9,
+      "candidate_rank": 9,
+      "completed_episodes_30d": null,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 1,
+        "open_position_notional_usd": "708357.12687",
+        "open_position_unrealized_pnl_usd": "121874.84457",
+        "perp_account_value_usd": "165669.86305",
+        "positions": [
+          {
+            "coin": "xyz:SILVER",
+            "dex": "xyz",
+            "entry_price": "57.2798",
+            "leverage": 25,
+            "leverage_type": "isolated",
+            "liquidation_price": "54.0842331641",
+            "position_value_usd": "708357.12687",
+            "side": "LONG",
+            "size": "10238.89",
+            "unrealized_pnl_usd": "121874.84457"
+          }
+        ],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": false,
+      "fill_analysis_90d": {
+        "active_days_90d": 17,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {
+          "xyz:MU": 4,
+          "xyz:PLTR": 2,
+          "xyz:SILVER": 9,
+          "xyz:SNDK": 1,
+          "xyz:SPCX": 3,
+          "xyz:TSLA": 4
+        },
+        "episode_direction_counts": {
+          "LONG": 23
+        },
+        "episode_entry_notional_coverage_complete": true,
+        "episode_entry_notional_usd": "23041119.58360",
+        "episode_fees_usdc": "3195.948006",
+        "episode_losses": 8,
+        "episode_net_pnl_usd": "-116550.552647",
+        "episode_net_return_on_entry_notional": "-0.005058371934754303333852343472",
+        "episode_validation_message_90d": null,
+        "episode_validation_reason_90d": null,
+        "episode_validation_valid_90d": true,
+        "episode_win_rate": 0.6521739130434783,
+        "episode_wins": 15,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Close Long": 1832,
+          "Open Long": 3552,
+          "Sell": 41,
+          "Spot Dust Conversion": 2
+        },
+        "first_fill_ms": 1782328024022,
+        "last_fill_ms": 1785766499575,
+        "median_episode_duration_ms": 56002455,
+        "median_episode_return_on_entry_notional": "0.005910392198526677532735850886",
+        "observed_notional_usd": "46732891.51181144030",
+        "pages_fetched": 3,
+        "raw_fill_count_90d": 5427,
+        "recent_completed_episodes": [
+          {
+            "coin": "xyz:SILVER",
+            "direction": "LONG",
+            "duration_ms": 313037178,
+            "entry_notional_usd": "517289.40190",
+            "entry_time_ms": 1785211749518,
+            "exit_time_ms": 1785524786696,
+            "net_pnl_usd": "5160.200696",
+            "return_on_entry_notional": "0.009975461853744968441040083099"
+          },
+          {
+            "coin": "xyz:PLTR",
+            "direction": "LONG",
+            "duration_ms": 278164830,
+            "entry_notional_usd": "490338.91227",
+            "entry_time_ms": 1784653691440,
+            "exit_time_ms": 1784931856270,
+            "net_pnl_usd": "-39159.464436",
+            "return_on_entry_notional": "-0.07986203716672857071760049487"
+          },
+          {
+            "coin": "xyz:TSLA",
+            "direction": "LONG",
+            "duration_ms": 56002455,
+            "entry_notional_usd": "660519.31554",
+            "entry_time_ms": 1784597621004,
+            "exit_time_ms": 1784653623459,
+            "net_pnl_usd": "15720.201660",
+            "return_on_entry_notional": "0.02379976071880370252586179200"
+          },
+          {
+            "coin": "xyz:SILVER",
+            "direction": "LONG",
+            "duration_ms": 57759421,
+            "entry_notional_usd": "873380.23553",
+            "entry_time_ms": 1784539767404,
+            "exit_time_ms": 1784597526825,
+            "net_pnl_usd": "3241.151833",
+            "return_on_entry_notional": "0.003711043256014543395652057549"
+          },
+          {
+            "coin": "xyz:SILVER",
+            "direction": "LONG",
+            "duration_ms": 3089400,
+            "entry_notional_usd": "1731348.97200",
+            "entry_time_ms": 1784517689336,
+            "exit_time_ms": 1784520778736,
+            "net_pnl_usd": "-10474.480060",
+            "return_on_entry_notional": "-0.006049895329824933756913334743"
+          },
+          {
+            "coin": "xyz:SPCX",
+            "direction": "LONG",
+            "duration_ms": 7311985,
+            "entry_notional_usd": "706935.802",
+            "entry_time_ms": 1784307921686,
+            "exit_time_ms": 1784315233671,
+            "net_pnl_usd": "4178.267849",
+            "return_on_entry_notional": "0.005910392198526677532735850886"
+          },
+          {
+            "coin": "xyz:SPCX",
+            "direction": "LONG",
+            "duration_ms": 834179,
+            "entry_notional_usd": "621923.6728",
+            "entry_time_ms": 1784303851534,
+            "exit_time_ms": 1784304685713,
+            "net_pnl_usd": "285.059370",
+            "return_on_entry_notional": "0.0004583510524959068578487466123"
+          },
+          {
+            "coin": "xyz:MU",
+            "direction": "LONG",
+            "duration_ms": 43698817,
+            "entry_notional_usd": "393480.30650",
+            "entry_time_ms": 1784256798887,
+            "exit_time_ms": 1784300497704,
+            "net_pnl_usd": "13066.920890",
+            "return_on_entry_notional": "0.03320857657713550652629676144"
+          },
+          {
+            "coin": "xyz:SILVER",
+            "direction": "LONG",
+            "duration_ms": 897291918,
+            "entry_notional_usd": "4869197.95418",
+            "entry_time_ms": 1783358358817,
+            "exit_time_ms": 1784255650735,
+            "net_pnl_usd": "-361304.469966",
+            "return_on_entry_notional": "-0.07420204998152425310152540051"
+          },
+          {
+            "coin": "xyz:TSLA",
+            "direction": "LONG",
+            "duration_ms": 272947394,
+            "entry_notional_usd": "2414986.64877",
+            "entry_time_ms": 1783085314292,
+            "exit_time_ms": 1783358261686,
+            "net_pnl_usd": "96315.290366",
+            "return_on_entry_notional": "0.03988232829985013118346457996"
+          }
+        ],
+        "taker_fill_ratio": 0.6100976598489036,
+        "top_coins_by_notional": [
+          {
+            "coin": "xyz:SILVER",
+            "fill_count": 2217,
+            "notional_usd": "28190060.58327"
+          },
+          {
+            "coin": "xyz:TSLA",
+            "fill_count": 2328,
+            "notional_usd": "12051590.28335"
+          },
+          {
+            "coin": "xyz:SPCX",
+            "fill_count": 383,
+            "notional_usd": "3145305.2827"
+          },
+          {
+            "coin": "xyz:PLTR",
+            "fill_count": 249,
+            "notional_usd": "1820167.61483"
+          },
+          {
+            "coin": "xyz:MU",
+            "fill_count": 176,
+            "notional_usd": "1171267.15121"
+          }
+        ],
+        "verified_completed_episodes_90d": 23,
+        "verified_open_started_episodes_90d": 1,
+        "verified_started_episodes_90d": 24
+      },
+      "perp_cashflow_neutral_twr_30d": "1.008695933570614868604818785",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0xcee22943040dbd15c55d877048b2586d8792fd7c"
+    },
+    {
+      "activity_rank": 10,
+      "candidate_rank": 10,
+      "completed_episodes_30d": 0,
+      "current_positions": {
+        "account_value_state_count": 11,
+        "open_position_count": 0,
+        "open_position_notional_usd": "0",
+        "open_position_unrealized_pnl_usd": "0",
+        "perp_account_value_usd": "494977.108123",
+        "positions": [],
+        "snapshot_complete": true
+      },
+      "episode_validation_reason_30d": null,
+      "episode_validation_valid_30d": true,
+      "fill_analysis_90d": {
+        "active_days_90d": 16,
+        "availability_limit_reached": false,
+        "coverage_complete": true,
+        "coverage_message_90d": null,
+        "episode_coin_counts": {
+          "SOL": 1,
+          "XMR": 3
+        },
+        "episode_direction_counts": {
+          "LONG": 4
+        },
+        "episode_entry_notional_coverage_complete": true,
+        "episode_entry_notional_usd": "1465809.80268",
+        "episode_fees_usdc": "956.699028",
+        "episode_losses": 2,
+        "episode_net_pnl_usd": "-17810.957470",
+        "episode_net_return_on_entry_notional": "-0.01215093352318663591815242042",
+        "episode_validation_message_90d": null,
+        "episode_validation_reason_90d": null,
+        "episode_validation_valid_90d": true,
+        "episode_win_rate": 0.5,
+        "episode_wins": 2,
+        "episodes_observed_before_failure": 0,
+        "fill_direction_counts": {
+          "Close Long": 1050,
+          "Open Long": 651,
+          "Sell": 34,
+          "Spot Dust Conversion": 2
+        },
+        "first_fill_ms": 1779975384943,
+        "last_fill_ms": 1785610023108,
+        "median_episode_duration_ms": 775386233,
+        "median_episode_return_on_entry_notional": "-0.001467964891857084200820973762",
+        "observed_notional_usd": "10256239.3386571789",
+        "pages_fetched": 1,
+        "raw_fill_count_90d": 1737,
+        "recent_completed_episodes": [
+          {
+            "coin": "XMR",
+            "direction": "LONG",
+            "duration_ms": 3896561013,
+            "entry_notional_usd": "158552.09351",
+            "entry_time_ms": 1781308200910,
+            "exit_time_ms": 1785204761923,
+            "net_pnl_usd": "-10583.639415",
+            "return_on_entry_notional": "-0.06675181122305699412142691171"
+          },
+          {
+            "coin": "SOL",
+            "direction": "LONG",
+            "duration_ms": 1224626895,
+            "entry_notional_usd": "1110810.72076",
+            "entry_time_ms": 1783974390276,
+            "exit_time_ms": 1785199017171,
+            "net_pnl_usd": "-12023.498959",
+            "return_on_entry_notional": "-0.01082407536611971364639784682"
+          },
+          {
+            "coin": "XMR",
+            "direction": "LONG",
+            "duration_ms": 2612851,
+            "entry_notional_usd": "91050.98841",
+            "entry_time_ms": 1780371780460,
+            "exit_time_ms": 1780374393311,
+            "net_pnl_usd": "718.223452",
+            "return_on_entry_notional": "0.007888145582405545244755899295"
+          },
+          {
+            "coin": "XMR",
+            "direction": "LONG",
+            "duration_ms": 326145571,
+            "entry_notional_usd": "105396.00000",
+            "entry_time_ms": 1779975384943,
+            "exit_time_ms": 1780301530514,
+            "net_pnl_usd": "4077.957452",
+            "return_on_entry_notional": "0.03869176678431819044366010095"
+          }
+        ],
+        "taker_fill_ratio": 0.5705238917674151,
+        "top_coins_by_notional": [
+          {
+            "coin": "SOL",
+            "fill_count": 629,
+            "notional_usd": "6752112.23623"
+          },
+          {
+            "coin": "ETH",
+            "fill_count": 161,
+            "notional_usd": "2175610.98104"
+          },
+          {
+            "coin": "XMR",
+            "fill_count": 703,
+            "notional_usd": "704361.68718"
+          },
+          {
+            "coin": "BCH",
+            "fill_count": 208,
+            "notional_usd": "496964.48580"
+          },
+          {
+            "coin": "@151",
+            "fill_count": 35,
+            "notional_usd": "126603.1968871789"
+          }
+        ],
+        "verified_completed_episodes_90d": 4,
+        "verified_open_started_episodes_90d": 1,
+        "verified_started_episodes_90d": 5
+      },
+      "perp_cashflow_neutral_twr_30d": "0.8922578881978876342735242603",
+      "raw_fill_count_30d": 1,
+      "source_account_value_usd": null,
+      "wallet": "0xb64460b8f4a2f521b815a209f053d35fb1977d51"
+    }
+  ],
+  "websocket_snapshot_count": 10,
+  "window_end_ms": 1787298809183,
+  "window_start_ms": 1779522809183
+}

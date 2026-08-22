@@ -95,11 +95,24 @@ def summarize_fill_history(
     taker_count = 0
     observed_notional = Decimal("0")
     timestamps: list[int] = []
+    started_episode_count = 0
     for fill in raw:
         timestamp = int(fill.get("time", 0))
         if not window_start_ms <= timestamp <= window_end_ms:
             continue
         coin = str(fill.get("coin") or "<MISSING>")
+        if not coin.startswith("@") and "/" not in coin:
+            try:
+                start_position = _decimal(fill.get("startPosition"))
+                size = _decimal(fill.get("sz"))
+                delta = size if fill.get("side") == "B" else -size if fill.get("side") == "A" else Decimal("0")
+                end_position = start_position + delta
+                if (start_position == 0 and end_position != 0) or (
+                    start_position != 0 and end_position != 0 and (start_position > 0) != (end_position > 0)
+                ):
+                    started_episode_count += 1
+            except (InvalidOperation, TypeError, ValueError):
+                pass
         notional = abs(_decimal(fill.get("px")) * _decimal(fill.get("sz")))
         coin_fill_counts[coin] += 1
         coin_notional[coin] += notional
@@ -117,6 +130,21 @@ def summarize_fill_history(
     losses = sum(1 for episode in episodes if episode.net_pnl < 0)
     net_pnl = sum((episode.net_pnl for episode in episodes), Decimal("0"))
     fees = sum((episode.fees_usdc for episode in episodes), Decimal("0"))
+    entry_notional_complete = all(
+        episode.entry_notional_usd is not None and episode.entry_notional_usd > 0
+        for episode in episodes
+    )
+    entry_notional = sum(
+        (episode.entry_notional_usd or Decimal("0") for episode in episodes), Decimal("0")
+    )
+    episode_returns = [
+        episode.net_pnl / episode.entry_notional_usd
+        for episode in episodes
+        if episode.entry_notional_usd is not None and episode.entry_notional_usd > 0
+    ]
+    notional_weighted_return = (
+        net_pnl / entry_notional if entry_notional_complete and entry_notional > 0 else None
+    )
     durations = [episode.duration_ms for episode in episodes]
     verified_episode_count = len(episodes) if result.valid else None
     return {
@@ -136,7 +164,11 @@ def summarize_fill_history(
         "episode_validation_valid_90d": result.valid,
         "episode_validation_reason_90d": result.reason_code,
         "episode_validation_message_90d": result.reason_message,
+        "verified_started_episodes_90d": started_episode_count if result.valid else None,
         "verified_completed_episodes_90d": verified_episode_count,
+        "verified_open_started_episodes_90d": (
+            started_episode_count - len(episodes) if result.valid else None
+        ),
         "episodes_observed_before_failure": len(episodes) if not result.valid else 0,
         "episode_coin_counts": dict(sorted(episode_coin_counts.items())),
         "episode_direction_counts": dict(sorted(episode_direction_counts.items())),
@@ -145,6 +177,16 @@ def summarize_fill_history(
         "episode_win_rate": (wins / len(episodes)) if result.valid and episodes else None,
         "episode_net_pnl_usd": str(net_pnl) if result.valid else None,
         "episode_fees_usdc": str(fees) if result.valid else None,
+        "episode_entry_notional_coverage_complete": result.valid and entry_notional_complete,
+        "episode_entry_notional_usd": (
+            str(entry_notional) if result.valid and entry_notional_complete else None
+        ),
+        "episode_net_return_on_entry_notional": (
+            str(notional_weighted_return) if result.valid and notional_weighted_return is not None else None
+        ),
+        "median_episode_return_on_entry_notional": (
+            str(median(episode_returns)) if result.valid and episode_returns else None
+        ),
         "median_episode_duration_ms": int(median(durations)) if result.valid and durations else None,
         "recent_completed_episodes": [
             {
@@ -153,6 +195,13 @@ def summarize_fill_history(
                 "entry_time_ms": episode.entry_time_ms,
                 "exit_time_ms": episode.exit_time_ms,
                 "net_pnl_usd": str(episode.net_pnl),
+                "entry_notional_usd": (
+                    str(episode.entry_notional_usd) if episode.entry_notional_usd is not None else None
+                ),
+                "return_on_entry_notional": (
+                    str(episode.net_pnl / episode.entry_notional_usd)
+                    if episode.entry_notional_usd is not None and episode.entry_notional_usd > 0 else None
+                ),
                 "duration_ms": episode.duration_ms,
             }
             for episode in sorted(episodes, key=lambda item: item.exit_time_ms, reverse=True)[:10]
