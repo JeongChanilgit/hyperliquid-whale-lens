@@ -29,9 +29,12 @@ export const normalizeAddress = (value) => {
 };
 
 export const normalizeCoin = (value) => {
-  const coin = String(value ?? "").trim().toUpperCase();
-  if (!coin) throw new Error("coin is required");
-  return coin;
+  const raw = String(value ?? "").trim();
+  if (!raw) throw new Error("coin is required");
+  const separator = raw.indexOf(":");
+  return separator < 0
+    ? raw.toUpperCase()
+    : `${raw.slice(0, separator).toLowerCase()}:${raw.slice(separator + 1).toUpperCase()}`;
 };
 
 export const cloneLeverage = (leverage) => {
@@ -63,14 +66,22 @@ export const signedPositionNotionalUsd = (position) => {
 
 export const marginPoolEquityUsd = (snapshot, poolId = "default") => {
   const pools = snapshot?.marginPools ?? {};
-  const pool = pools[poolId] ?? pools.default;
-  if (pool && Number.isFinite(Number(pool.equityUsd)) && Number(pool.equityUsd) > 0) {
-    return Number(pool.equityUsd);
+  const entries = Object.entries(pools);
+  const pool = pools[poolId] ?? (poolId === "default" ? pools.default : undefined);
+  if (pool) {
+    const equity = Number(pool.equityUsd);
+    if (Number.isFinite(equity) && equity > 0) return equity;
+    throw new Error(`margin pool ${poolId} has no funded positive equity`);
   }
+  if (entries.length > 0) throw new Error(`margin pool ${poolId} is missing from the account snapshot`);
   return positive(snapshot?.accountEquityUsd, "snapshot.accountEquityUsd");
 };
 
-export const targetPositionFromSource = ({ sourcePosition, sourceSnapshot, targetSnapshot }) => {
+export const targetPositionFromSource = ({
+  sourcePosition,
+  sourceSnapshot,
+  targetSnapshot,
+}) => {
   if (!sourcePosition) throw new Error("sourcePosition is required");
   const coin = normalizeCoin(sourcePosition.coin);
   const sourceLeverage = cloneLeverage(sourcePosition.leverage);
