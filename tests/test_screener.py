@@ -207,8 +207,8 @@ class MetricTests(unittest.TestCase):
         }]]
         self.assertIsNone(calculate_portfolio_metrics(portfolio, 0, 10))
 
-    def test_minimum_completed_episode_cut_is_ten(self):
-        self.assertEqual(MIN_COMPLETED_EPISODES, 10)
+    def test_completed_episode_cut_is_disabled(self):
+        self.assertEqual(MIN_COMPLETED_EPISODES, 0)
         self.assertEqual(TARGET_WHALE_COUNT, 10)
 
 

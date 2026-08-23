@@ -24,7 +24,8 @@ LEADERBOARD_URL = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
 INFO_URL = "https://api.hyperliquid.xyz/info"
 THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 MIN_ACCOUNT_VALUE = Decimal("10000")
-MIN_COMPLETED_EPISODES = 10
+MIN_COMPLETED_EPISODES = 0  # deprecated diagnostic-only compatibility constant
+MIN_OBSERVED_RAW_FILLS = 1
 TARGET_WHALE_COUNT = 10
 MDD_CUTOFF = Decimal("0.40")
 RANKING_OFFICIAL_ROI = "official-roi"
@@ -626,17 +627,17 @@ def build_markdown(report: dict[str, Any]) -> str:
             "",
             "## Data-quality policy applied",
             "",
-            "- Calculations use `userFillsByTime` with `aggregateByTime: true`; a non-aggregated pass checks the 10,000-fill availability ceiling for wallets that otherwise meet the episode count.",
+            "- Activity uses `userFillsByTime` with `aggregateByTime: false`; each raw perpetual fill row is one observed trade and completed episodes never gate selection.",
             (
                 "- Final ranking compounds sampled interval returns. If a deposit and PnL share a coarse interval, the deposit is included in that interval's capital base; withdrawals are applied after the interval. This prevents dust-balance inflation. Because public portfolio points are sampled, this is an estimate rather than exact event-boundary TWR."
                 if ranking_metric in {RANKING_PORTFOLIO_GROWTH, RANKING_COMPOUNDED_GROWTH}
                 else "- Final ranking uses Hyperliquid's official 30D ROI, whose portfolio PnL is adjusted for deposits and withdrawals."
             ),
             f"- Deep-screen coverage is the first {params['candidate_limit']:,} eligible leaderboard wallets ordered by official 30D ROI; the report does not claim coverage outside that declared candidate pool.",
-            f"- Wallets with fewer than {params['minimum_completed_episodes']} completed position episodes are excluded; partial fills never count as separate investments.",
+            f"- Wallets need at least {params.get('minimum_observed_raw_fills', 1)} observed raw perpetual fill; a positive observation remains activity proof under partial coverage, while its exact count is then a lower bound.",
             "- Portfolio MDD is measured on the same compounded cash-flow-neutral index and therefore includes open-position equity changes.",
-            "- Carry-in and still-open positions are excluded only from the completed-episode count and completed net PnL diagnostic.",
-            "- Completed spot episodes or completed episodes with non-USDC fees are marked UNVERIFIABLE because their net PnL cannot be compared exactly from the required fields.",
+            "- Carry-in, still-open positions, and completed episodes may be retained as reference diagnostics but do not affect eligibility, order, risk, or copyability.",
+            "- Spot fills are excluded from perpetual activity; episode fee/continuity issues do not invalidate already observed perpetual activity.",
             "- Funding and unrealized PnL remain excluded from completed net PnL, but are represented in official portfolio ROI/MDD.",
             "",
         ]
@@ -672,7 +673,7 @@ def rerank_existing_report(args: argparse.Namespace) -> dict[str, Any]:
     candidates = [
         row
         for row in analyzed
-        if int(row.get("completed_episodes", 0)) >= MIN_COMPLETED_EPISODES
+        if int(row.get("raw_fill_count", 0)) >= MIN_OBSERVED_RAW_FILLS
         and row.get("portfolio_observations") is not None
         and row.get("status") != "UNVERIFIABLE"
     ]
@@ -687,10 +688,7 @@ def rerank_existing_report(args: argparse.Namespace) -> dict[str, Any]:
                 row.update(status="UNVERIFIABLE", reason="missing aligned non-negative 30D portfolio history")
             else:
                 row.update(**serializable(metrics))
-                if dec(metrics["portfolio_mdd"]) >= MDD_CUTOFF:
-                    row.update(status="DROP", reason="cashflow-adjusted portfolio MDD is at least 40%")
-                else:
-                    row.update(status="PASS", reason=None)
+                row.update(status="PASS", reason=None)
         except Exception as exc:
             row.update(status="UNVERIFIABLE", reason=f"portfolio rerank error: {exc}")
         print(
@@ -798,34 +796,25 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "reason": None,
         }
         try:
-            fills, fills_error = fetch_fills_by_time(
-                client, wallet, window_start, window_end, aggregate_by_time=True
-            )
-            if fills_error:
-                base.update(status="UNVERIFIABLE", reason=fills_error, aggregate_fill_count=len(fills))
-                analyzed.append(base)
-                continue
-
-            episodes, episode_error = reconstruct_completed_episodes(fills, window_start, window_end)
-            base["aggregate_fill_count"] = len(fills)
-            base["completed_episodes"] = len(episodes)
-            if episode_error:
-                base.update(status="UNVERIFIABLE", reason=episode_error)
-                analyzed.append(base)
-                continue
-            if len(episodes) < MIN_COMPLETED_EPISODES:
-                base.update(reason=f"fewer than {MIN_COMPLETED_EPISODES} completed episodes")
-                analyzed.append(base)
-                continue
-
             raw_fills, raw_error = fetch_fills_by_time(
                 client, wallet, window_start, window_end, aggregate_by_time=False
             )
             base["raw_fill_count"] = len(raw_fills)
-            if raw_error:
-                base.update(status="UNVERIFIABLE", reason=f"raw completeness check: {raw_error}")
+            base["raw_fill_aggregate_by_time"] = False
+            base["raw_fill_coverage_complete"] = raw_error is None
+            base["raw_fill_count_is_lower_bound"] = raw_error is not None
+            if not raw_fills and raw_error:
+                base.update(status="UNVERIFIABLE", reason=f"raw activity check: {raw_error}")
                 analyzed.append(base)
                 continue
+            if not raw_fills:
+                base.update(reason="no observed raw perpetual fills")
+                analyzed.append(base)
+                continue
+
+            episodes, episode_error = reconstruct_completed_episodes(raw_fills, window_start, window_end)
+            base["completed_episodes"] = len(episodes) if episode_error is None else None
+            base["episode_diagnostic_reason"] = episode_error
 
             portfolio = client.post_info({"type": "portfolio", "user": wallet})
             portfolio_metrics = calculate_portfolio_metrics(portfolio, window_start, window_end)
@@ -849,10 +838,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 max_single_episode_loss=metrics["max_single_episode_loss"],
                 episodes=episodes,
             )
-            if portfolio_metrics["portfolio_mdd"] >= MDD_CUTOFF:
-                base.update(reason="cashflow-adjusted portfolio MDD is at least 40%")
-            else:
-                base.update(status="PASS", reason=None)
+            base.update(status="PASS", reason=None)
             analyzed.append(base)
         except Exception as exc:  # keep one bad wallet from invalidating the cycle
             base.update(status="UNVERIFIABLE", reason=f"request or calculation error: {exc}")
@@ -918,8 +904,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "candidate_limit": args.candidate_limit,
             "target_count": args.target_count,
             "ranking_metric": args.ranking_metric,
-            "minimum_completed_episodes": MIN_COMPLETED_EPISODES,
-            "mdd_cutoff": MDD_CUTOFF,
+            "minimum_completed_episodes": None,
+            "minimum_observed_raw_fills": MIN_OBSERVED_RAW_FILLS,
+            "mdd_cutoff": None,
             "prior_state_ignored": args.ignore_prior_state,
         },
         "counts": {
@@ -988,7 +975,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ledger-expand-step", type=int, default=500)
     parser.add_argument("--boundary-probe-count", type=int, default=100)
     parser.add_argument("--candidate-count", type=int, default=2000)
-    parser.add_argument("--minimum-completed-episodes", type=int, default=10)
+    parser.add_argument("--minimum-completed-episodes", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--minimum-observed-raw-fills", type=int, default=1)
     parser.add_argument("--fill-validation-mode", choices=("until-10", "full-2000"), default="until-10")
     parser.add_argument("--strict-cashflow-boundaries", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--portfolio-request-budget", type=int, default=8000)
@@ -1023,10 +1011,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.new_wallet_top, args.rotating_sample_count, args.discovery_pool_target,
         args.discovery_pool_min, args.discovery_pool_max, args.ledger_verification_count,
         args.ledger_expand_step, args.boundary_probe_count, args.candidate_count,
-        args.minimum_completed_episodes, args.portfolio_request_budget,
+        args.minimum_observed_raw_fills, args.portfolio_request_budget,
         args.ledger_request_budget, args.fill_request_budget,
     )
-    if any(value <= 0 for value in positive) or args.request_delay < 0 or args.minimum_account_value < 0:
+    if any(value <= 0 for value in positive) or args.minimum_completed_episodes < 0 or args.request_delay < 0 or args.minimum_account_value < 0:
         parser.error("screening counts and budgets must be positive; delays/account minimum cannot be negative")
     return args
 
@@ -1058,6 +1046,7 @@ def main(argv: list[str] | None = None) -> int:
                 candidate_count=args.candidate_count,
                 final_active_count=args.target_count,
                 minimum_completed_episodes=args.minimum_completed_episodes,
+                minimum_observed_raw_fills=args.minimum_observed_raw_fills,
                 fill_validation_mode=args.fill_validation_mode.replace("-", "_").upper(),
                 strict_cashflow_boundaries=args.strict_cashflow_boundaries,
                 portfolio_request_budget=args.portfolio_request_budget,

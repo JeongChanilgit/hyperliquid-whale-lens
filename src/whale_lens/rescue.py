@@ -100,18 +100,25 @@ def _reason_list(row: Mapping[str, Any]) -> list[str]:
     return sorted(set(values))
 
 
-def _activity(fill_result: Mapping[str, Any] | None, minimum_completed_episodes: int) -> tuple[ActivityStatus, int | None, int]:
+def _activity(fill_result: Mapping[str, Any] | None, minimum_observed_raw_fills: int) -> tuple[ActivityStatus, int | None, int]:
     if not fill_result:
         return ActivityStatus.NOT_YET_SCANNED, None, 0
     raw_count = int(fill_result.get("raw_fill_count", 0))
-    if not fill_result.get("valid"):
-        return ActivityStatus.ACTIVITY_UNVERIFIABLE, None, raw_count
-    completed = int(fill_result.get("completed_episodes", len(fill_result.get("episodes") or [])))
-    return (
-        ActivityStatus.QUALIFIED if completed >= minimum_completed_episodes else ActivityStatus.INSUFFICIENT_COMPLETED_EPISODES,
-        completed,
-        raw_count,
+    completed_value = fill_result.get("completed_episodes")
+    completed = (
+        int(completed_value)
+        if completed_value is not None
+        else len(fill_result.get("episodes") or [])
     )
+    if raw_count >= minimum_observed_raw_fills:
+        return ActivityStatus.QUALIFIED, completed, raw_count
+    coverage_complete = fill_result.get(
+        "raw_fill_coverage_complete",
+        fill_result.get("coverage_complete", fill_result.get("valid")),
+    )
+    if coverage_complete is True:
+        return ActivityStatus.NO_OBSERVED_RAW_FILLS, completed, raw_count
+    return ActivityStatus.ACTIVITY_UNVERIFIABLE, completed, raw_count
 
 
 @dataclass(frozen=True)
@@ -152,14 +159,18 @@ def evaluate_account(
     samples: Sequence[PerpPortfolioSample] = (),
     classified_flows: Sequence[ClassifiedCashFlow] = (),
     fill_result: Mapping[str, Any] | None = None,
-    minimum_completed_episodes: int = 10,
+    minimum_observed_raw_fills: int = 1,
+    minimum_completed_episodes: int | None = None,
 ) -> RescueEvaluation:
     wallet = str(row["wallet"]).lower()
     provisional = _decimal(row.get("provisional_perp_twr_30d"))
     exact = _decimal(row.get(METRIC)) if str(row.get("quality")) == "VERIFIED" else None
     source_reasons = tuple(_reason_list(row))
     reasons = set(source_reasons)
-    activity, completed, raw_fills = _activity(fill_result, minimum_completed_episodes)
+    # Completed episodes are retained for diagnostics only. The legacy argument
+    # remains accepted so old callers do not break, but it never affects status.
+    del minimum_completed_episodes
+    activity, completed, raw_fills = _activity(fill_result, minimum_observed_raw_fills)
     scores: dict[str, str | None] = {
         "provisional_twr": None if provisional is None else str(provisional),
         "exact_twr": None if exact is None else str(exact),
@@ -348,7 +359,8 @@ def build_rescue_report(
                 samples=samples,
                 classified_flows=classified,
                 fill_result=fill_result,
-                minimum_completed_episodes=int(source_report.get("minimum_completed_episodes", 10)),
+                minimum_observed_raw_fills=int(source_report.get("minimum_observed_raw_fills", 1)),
+                minimum_completed_episodes=None,
             )
         )
         if progress and (row_index % 250 == 0 or row_index == len(rows)):
@@ -410,6 +422,8 @@ def build_rescue_report(
         "as_of_ms": source_report["as_of_ms"],
         "window_start_ms": source_report["window_start_ms"],
         "window_end_ms": source_report["window_end_ms"],
+        "minimum_observed_raw_fills": int(source_report.get("minimum_observed_raw_fills", 1)),
+        "minimum_completed_episodes": None,
         "discovered_accounts": len(evaluations),
         "quality_counts": dict(sorted(quality_counts.items())),
         "reason_counts": dict(sorted(reason_counts.items())),

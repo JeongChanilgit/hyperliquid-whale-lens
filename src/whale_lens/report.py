@@ -81,7 +81,8 @@ def build_report_metadata(**overrides: Any) -> dict[str, Any]:
         "candidate_count_actual": 0,
         "candidate_pool_complete": False,
         "candidate_pool_hash": None,
-        "minimum_completed_episodes": 10,
+        "minimum_completed_episodes": None,
+        "minimum_observed_raw_fills": 1,
         "fill_validation_mode": "UNTIL_10",
         "fills_scanned_candidate_count": 0,
         "outside_pool_sample_count": 0,
@@ -127,6 +128,7 @@ def build_markdown_report(report: Mapping[str, Any]) -> str:
         f"- Boundary breaches: {report.get('boundary_breach_count', 0)}",
         f"- Outside-pool threshold breaches: {report.get('outside_pool_threshold_breach_count', 0)}",
         f"- Fill validation: `{report.get('fill_validation_mode')}`; scanned {report.get('fills_scanned_candidate_count', 0)}",
+        f"- Minimum observed raw fills: {report.get('minimum_observed_raw_fills', 1)}; completed episodes are diagnostic-only",
         f"- Finalists: {report.get('finalist_count', len(report.get('finalists', [])))}",
         f"- Canonical state updated: `{report.get('canonical_state_updated')}`",
         "",
@@ -234,6 +236,8 @@ def build_canonical_state(
         "ranking_scope": report.get("ranking_scope"),
         "window_start_ms": report.get("window_start_ms"),
         "window_end_ms": report.get("window_end_ms"),
+        "minimum_completed_episodes": None,
+        "minimum_observed_raw_fills": report.get("minimum_observed_raw_fills", 1),
         "wallets": wallets,
         "finalists": final_rows,
         "config_hash": config_hash,
@@ -285,6 +289,34 @@ def canonical_update_block_reasons(
         reasons.append("FULL_DISCOVERY_REFRESH_INCOMPLETE")
     if finalist_count < minimum_finalists or len(canonical_state.get("wallets", [])) < minimum_finalists:
         reasons.append("INSUFFICIENT_FINALISTS")
+    try:
+        minimum_raw_fills = int(report.get("minimum_observed_raw_fills", 1))
+    except (TypeError, ValueError):
+        minimum_raw_fills = 0
+    if minimum_raw_fills <= 0:
+        reasons.append("INVALID_MINIMUM_OBSERVED_RAW_FILLS")
+    finalist_rows = report.get("finalists", [])
+    if not isinstance(finalist_rows, list):
+        reasons.append("FINALIST_RAW_FILL_EVIDENCE_MISSING")
+    else:
+        for row in finalist_rows:
+            if not isinstance(row, Mapping):
+                reasons.append("FINALIST_RAW_FILL_EVIDENCE_MISSING")
+                break
+            try:
+                raw_fill_count = int(row.get("observed_raw_fill_count", row.get("raw_fill_count")))
+            except (TypeError, ValueError):
+                reasons.append("FINALIST_RAW_FILL_EVIDENCE_MISSING")
+                break
+            if raw_fill_count < minimum_raw_fills:
+                reasons.append("FINALIST_RAW_FILL_ACTIVITY_MISSING")
+                break
+            if not isinstance(row.get("raw_fill_coverage_complete"), bool):
+                reasons.append("FINALIST_RAW_FILL_COVERAGE_MISSING")
+                break
+            if row.get("raw_fill_aggregate_by_time") is not False:
+                reasons.append("FINALIST_RAW_FILLS_NOT_UNAGGREGATED")
+                break
     if report.get("candidate_pool_hash") != canonical_state.get("candidate_pool_hash"):
         reasons.append("CANDIDATE_POOL_HASH_MISMATCH")
     if runner_candidate_pool_hash is not None and runner_candidate_pool_hash != canonical_state.get("candidate_pool_hash"):

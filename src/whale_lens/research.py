@@ -62,7 +62,20 @@ def _compact(row: Mapping[str, Any]) -> dict[str, Any]:
         METRIC_NAME: str(_decimal(row.get(METRIC_NAME), METRIC_NAME)),
         "current_account_value_usd": str(_decimal(row.get("current_account_value_usd"), "current_account_value_usd")),
     }
-    for key in ("completed_episodes", "raw_fill_count", "reason_code", "reason_message"):
+    for key in (
+        "completed_episodes",
+        "raw_fill_count",
+        "observed_raw_fill_count",
+        "raw_fill_count_is_lower_bound",
+        "raw_fill_coverage_complete",
+        "raw_fill_aggregate_by_time",
+        "raw_fill_activity_observed",
+        "episode_diagnostic_valid",
+        "episode_diagnostic_reason_code",
+        "episode_diagnostic_reason_message",
+        "reason_code",
+        "reason_message",
+    ):
         if row.get(key) is not None:
             compact[key] = row[key]
     return compact
@@ -78,7 +91,8 @@ def activate_partial_research_top10(
     fill_validator: Callable[[Mapping[str, Any]], Any],
     target_count: int = 10,
     standby_count: int = 40,
-    minimum_completed_episodes: int = 10,
+    minimum_observed_raw_fills: int = 1,
+    minimum_completed_episodes: int | None = None,
     authorized_at_utc: str | None = None,
 ) -> dict[str, Any]:
     """Validate fills, select research TOP10, and atomically write three artifacts."""
@@ -116,11 +130,11 @@ def activate_partial_research_top10(
         ordered,
         fill_validator,
         target_count=target_count,
-        minimum_completed_episodes=minimum_completed_episodes,
+        minimum_raw_fills=minimum_observed_raw_fills,
         fill_validation_mode="UNTIL_10",
     )
     if not validation.complete or len(validation.finalists) != target_count:
-        raise ValueError("fewer than 10 research finalists passed raw-fill episode validation")
+        raise ValueError("fewer than 10 research finalists passed raw-fill activity validation")
 
     active_rows: list[dict[str, Any]] = []
     active_wallets: set[str] = set()
@@ -168,7 +182,8 @@ def activate_partial_research_top10(
         "candidate_count_actual": source_candidate.get("candidate_count_actual"),
         "candidate_pool_complete": False,
         "fills_scanned_candidate_count": validation.fills_scanned_candidate_count,
-        "minimum_completed_episodes": minimum_completed_episodes,
+        "minimum_completed_episodes": None,
+        "minimum_observed_raw_fills": minimum_observed_raw_fills,
         "candidates": selected,
     }
     compact_report = {
@@ -195,7 +210,8 @@ def activate_partial_research_top10(
         "candidate_count_actual": source_report["candidate_count_actual"],
         "outside_shard_coverage_complete": True,
         "outside_pool_threshold_breach_count": 0,
-        "minimum_completed_episodes": minimum_completed_episodes,
+        "minimum_completed_episodes": None,
+        "minimum_observed_raw_fills": minimum_observed_raw_fills,
         "fills_scanned_candidate_count": validation.fills_scanned_candidate_count,
         "finalist_count": len(active_rows),
         "target_count": target_count,
@@ -224,6 +240,8 @@ def activate_partial_research_top10(
         "canonical_state_updated": False,
         "research_override_authorized": True,
         "selection_mode": SELECTION_MODE,
+        "minimum_completed_episodes": None,
+        "minimum_observed_raw_fills": minimum_observed_raw_fills,
     }
 
     write_json_atomic(research_candidate_path, compact_candidate)

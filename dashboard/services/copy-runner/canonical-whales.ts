@@ -177,9 +177,9 @@ export const loadCanonicalTop10 = (options: CanonicalTop10Options): CanonicalTop
       const wallet = wallets[index];
       const finalist = finalistRows[index];
       const candidateRank = integer(finalist.candidate_rank, `research finalist[${index}].candidate_rank`);
-      const episodes = integer(finalist.completed_episodes, `research finalist[${index}].completed_episodes`);
+      const rawFills = integer(finalist.raw_fill_count, `research finalist[${index}].raw_fill_count`);
       if (candidateRank <= previousCandidateRank) throw new Error("research finalists must preserve candidate TWR order");
-      if (episodes < 10) throw new Error("research finalists must have at least 10 completed episodes");
+      if (rawFills < 1) throw new Error("research finalists must have at least one observed raw perpetual fill");
       previousCandidateRank = candidateRank;
       const source = candidates.find((value) => {
         if (!value || typeof value !== "object" || Array.isArray(value)) return false;

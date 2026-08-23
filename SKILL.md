@@ -14,8 +14,8 @@ description: Hyperliquid 공개 데이터로 최근 30일 perpetual 입출금 �
 - cash flow는 현재 경계의 계좌가치 정합성에만 반영하고 다음 구간 자본을 바꾼다. 구간 수익률은 `Δpnl / previous account value`, 최종값은 `Π(1+r)-1`이다.
 - unknown/non-USD ledger type, 누락된 cash-flow 경계, 큰 reconciliation residual, 비양수 자본, 불완전 pagination은 `UNVERIFIABLE`이다.
 - MDD는 진단값이며 기본 탈락 조건이 아니다.
-- 코인별 `0 → non-zero → 0`을 완료 episode 1회로 센다. 분할진입·부분청산은 같은 episode이며, 최근 30일 완료 episode 합계가 10회 이상이어야 한다.
-- episode 검증은 `userFillsByTime`의 `aggregateByTime:false` 원본만 사용한다. 동일 millisecond API 순서와 `startPosition` 연결을 보존하고, 10,000 fills 한계나 불연속은 fail closed 처리한다.
+- ACTIVE 활동 증거는 `userFillsByTime`의 `aggregateByTime:false` perpetual 원본 체결 1건 이상이다. 이미 관측한 체결은 전체 페이지가 불완전해도 양성 활동 증거로 인정하되 정확한 체결 수라고 주장하지 않는다.
+- `0 → non-zero → 0` 완료 episode와 episode PnL은 선택·정렬·위험·카피 적합성 판단에서 제외한다. 필요하면 참고 진단으로만 계산한다.
 
 ## 기본 파이프라인
 
@@ -23,7 +23,7 @@ description: Hyperliquid 공개 데이터로 최근 30일 perpetual 입출금 �
 2. discovery pool 전체의 `perpMonth` provisional TWR을 계산한다.
 3. provisional 상위 2,500명부터 ledger 검증하고, VERIFIED 2,000명 또는 안정된 경계를 얻을 때까지 500명씩 확장한다. 매 경계마다 deterministic 100명 probe를 수행한다.
 4. verified TWR 상위 2,000명을 hash와 함께 freeze한다.
-5. candidate 순서대로 raw fills를 검사해 완료 episode 10회 이상인 첫 10명을 `ACTIVE`로 정한다.
+5. candidate 순서대로 raw fills를 검사해 관측된 perpetual 원본 체결이 1건 이상인 첫 10명을 `ACTIVE`로 정한다. 완료 episode 수는 보지 않는다.
 
 `FAST_INCREMENTAL` 결과의 범위는 `DISCOVERY_POOL_EXACT`다. 전체 적격 지갑을 provisional scan한 `FULL_DISCOVERY_REFRESH`만 전 우주 범위로 표시한다.
 

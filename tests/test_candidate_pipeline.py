@@ -88,7 +88,7 @@ class CandidateFreezeTests(unittest.TestCase):
 
 
 class FinalistAndCanonicalTests(unittest.TestCase):
-    def test_until_10_stops_after_first_qualifying_finalists_in_candidate_rank_order(self):
+    def test_until_10_keeps_twr_order_when_episode_counts_are_diagnostic_only(self):
         candidates = [
             {**verified("0xa", 3), "candidate_rank": 1},
             {**verified("0xb", 2), "candidate_rank": 2},
@@ -96,19 +96,99 @@ class FinalistAndCanonicalTests(unittest.TestCase):
             {**verified("0xd", 0), "candidate_rank": 4},
         ]
         outcomes = {
-            "0xa": {"valid": True, "completed_episodes": 10, "raw_fill_count": 4},
-            "0xb": {"valid": True, "completed_episodes": 9, "raw_fill_count": 4},
-            "0xc": {"valid": True, "completed_episodes": 11, "raw_fill_count": 4},
-            "0xd": {"valid": True, "completed_episodes": 12, "raw_fill_count": 4},
+            "0xa": {
+                "valid": True,
+                "completed_episodes": 0,
+                "raw_fill_count": 1,
+                "raw_fill_coverage_complete": False,
+                "raw_fill_aggregate_by_time": False,
+                "raw_fill_count_is_lower_bound": True,
+            },
+            "0xb": {
+                "valid": True,
+                "completed_episodes": 9,
+                "raw_fill_count": 1,
+                "raw_fill_coverage_complete": True,
+                "raw_fill_aggregate_by_time": False,
+            },
+            "0xc": {
+                "valid": True,
+                "completed_episodes": 11,
+                "raw_fill_count": 1,
+                "raw_fill_coverage_complete": True,
+                "raw_fill_aggregate_by_time": False,
+            },
+            "0xd": {
+                "valid": True,
+                "completed_episodes": 12,
+                "raw_fill_count": 4,
+                "raw_fill_coverage_complete": True,
+                "raw_fill_aggregate_by_time": False,
+            },
         }
-        result = validate_candidates_until_finalists(candidates, lambda row: outcomes[row["wallet"]], target_count=2)
+        result = validate_candidates_until_finalists(
+            candidates,
+            lambda row: outcomes[row["wallet"]],
+            target_count=2,
+            minimum_completed_episodes=100,
+        )
         self.assertTrue(result.complete)
-        self.assertEqual([row["wallet"] for row in result.finalists], ["0xa", "0xc"])
-        self.assertEqual(result.fills_scanned_candidate_count, 3)
+        self.assertEqual([row["wallet"] for row in result.finalists], ["0xa", "0xb"])
+        self.assertEqual(result.fills_scanned_candidate_count, 2)
         self.assertTrue(all(row["status"] == "ACTIVE" for row in result.finalists))
+        self.assertFalse(result.finalists[0]["raw_fill_coverage_complete"])
+        self.assertTrue(result.finalists[0]["raw_fill_count_is_lower_bound"])
+
+    def test_zero_or_missing_raw_fill_evidence_cannot_qualify_a_finalist(self):
+        candidates = [
+            {**verified("0xa", 3), "candidate_rank": 1},
+            {**verified("0xb", 2), "candidate_rank": 2},
+            {**verified("0xc", 1), "candidate_rank": 3},
+        ]
+        outcomes = {
+            "0xa": {
+                "valid": True,
+                "completed_episodes": 50,
+                "raw_fill_count": 0,
+                "raw_fill_coverage_complete": True,
+                "raw_fill_aggregate_by_time": False,
+            },
+            "0xb": {
+                "valid": True,
+                "completed_episodes": 50,
+                "raw_fill_coverage_complete": True,
+                "raw_fill_aggregate_by_time": False,
+            },
+            "0xc": {
+                "valid": True,
+                "completed_episodes": 0,
+                "raw_fill_count": 1,
+                "raw_fill_coverage_complete": True,
+                "raw_fill_aggregate_by_time": False,
+            },
+        }
+        result = validate_candidates_until_finalists(candidates, lambda row: outcomes[row["wallet"]], target_count=1)
+        self.assertTrue(result.complete)
+        self.assertEqual([row["wallet"] for row in result.finalists], ["0xc"])
+        self.assertEqual(result.scanned_candidates[0]["reason_code"], "NO_OBSERVED_RAW_FILLS")
+        self.assertEqual(result.scanned_candidates[1]["reason_code"], "RAW_FILL_COUNT_MISSING")
+        self.assertEqual(result.fills_scanned_candidate_count, 3)
 
     def test_partial_or_outside_breach_cannot_replace_canonical_state(self):
-        finalists = [verified("0xa", 2), verified("0xb", 1)]
+        finalists = [
+            {
+                **verified("0xa", 2),
+                "raw_fill_count": 1,
+                "raw_fill_coverage_complete": False,
+                "raw_fill_aggregate_by_time": False,
+            },
+            {
+                **verified("0xb", 1),
+                "raw_fill_count": 1,
+                "raw_fill_coverage_complete": True,
+                "raw_fill_aggregate_by_time": False,
+            },
+        ]
         freeze = freeze_candidate_top2000(finalists, candidate_count=2)
         metadata = build_report_metadata(
             run_id="run-1",

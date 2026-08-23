@@ -982,8 +982,6 @@ def _inference(exposure: Mapping[str, Any], fills: Mapping[str, Any], portfolio:
             flags.append({"code": "LARGE_SOURCE_IMPLIED_FLOW", "severity": "MEDIUM", "basis": "portfolio.source_implied_flow_diagnostics"})
     if fills.get("status") != COMPLETE:
         flags.append({"code": "FILL_DATA_PARTIAL", "severity": "HIGH", "basis": "fills.coverage"})
-    if fills.get("episode_validation", {}).get("status") != COMPLETE:
-        flags.append({"code": "EPISODE_OUTCOMES_UNVERIFIABLE", "severity": "HIGH", "basis": "fills.episode_validation"})
     if ledger.get("status") != COMPLETE:
         flags.append({"code": "CASH_FLOW_DATA_PARTIAL", "severity": "MEDIUM", "basis": "cash_flows.coverage"})
     if exposure.get("position_count") not in (None, 0):
@@ -999,12 +997,12 @@ def _inference(exposure: Mapping[str, Any], fills: Mapping[str, Any], portfolio:
         directional = "LONG_BIASED" if net > ZERO else "SHORT_BIASED"
     else:
         directional = "MIXED"
-    episode_count = fills.get("episode_validation", {}).get("completed_episode_count")
     fill_count = fills.get("perpetual_fill_count")
-    if isinstance(episode_count, int) and episode_count > 0 and isinstance(fill_count, int) and Decimal(fill_count) / Decimal(episode_count) >= Decimal("3"):
-        execution = "SCALED_OR_ACTIVE"
+    activity_days = fills.get("activity_day_count")
+    if isinstance(fill_count, int) and fill_count > 0 and isinstance(activity_days, int) and activity_days > 0:
+        execution = "OBSERVED_CONTINUOUS_OR_SCALED_TRADING"
     elif isinstance(fill_count, int) and fill_count > 0:
-        execution = "DIRECTIONAL_OR_LOW_FREQUENCY"
+        execution = "OBSERVED_TRADING"
     else:
         execution = "UNKNOWN"
     blocked = any(flag["severity"] == "HIGH" for flag in flags)
@@ -1013,12 +1011,12 @@ def _inference(exposure: Mapping[str, Any], fills: Mapping[str, Any], portfolio:
         "strategy_style": {
             "current_directional_posture": directional,
             "execution_style": execution,
-            "basis": ["current_exposure.net_exposure_usd", "current_exposure.gross_exposure_usd", "fills.perpetual_fill_count", "fills.episode_validation.completed_episode_count"],
+            "basis": ["current_exposure.net_exposure_usd", "current_exposure.gross_exposure_usd", "fills.perpetual_fill_count", "fills.activity_day_count"],
         },
         "copyability": {
             "assessment": "LIMITED" if blocked else ("CAUTION" if flags else "MORE_OBSERVABLE"),
             "not_a_trade_recommendation": True,
-            "basis": ["raw-fill coverage", "episode validation", "current leverage/exposure", "cash-flow coverage"],
+            "basis": ["raw-fill activity/coverage", "current leverage/exposure", "cash-flow coverage"],
         },
         "risk_flags": sorted(flags, key=lambda item: (item["severity"], item["code"])),
     }

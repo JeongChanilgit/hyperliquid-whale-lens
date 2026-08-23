@@ -81,6 +81,26 @@ class OneTransientPortfolioFailureApi(FakeApi):
         return super().fetch_portfolio(wallet)
 
 
+class OpenOnlyFillApi(FakeApi):
+    def fetch_fills_by_time(self, wallet, start_time_ms, end_time_ms, *, aggregate_by_time=False):
+        return [
+            {
+                "time": start_time_ms + 100,
+                "coin": "BTC",
+                "startPosition": "0",
+                "side": "B",
+                "sz": "1",
+                "px": "100",
+                "closedPnl": "0",
+                "fee": "0",
+                "feeToken": "USDC",
+                "tid": 1,
+                "oid": 1,
+                "hash": f"{wallet}-open-only",
+            }
+        ]
+
+
 class HighOutsideShardApi(FakeApi):
     def __init__(self, as_of_ms, wallets, high_wallet):
         super().__init__(as_of_ms, wallets)
@@ -184,7 +204,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 replace(
                     original,
                     portfolio_request_budget=12,
-                    minimum_completed_episodes=original.minimum_completed_episodes + 1,
+                    minimum_observed_raw_fills=original.minimum_observed_raw_fills + 1,
                 ),
                 paths,
                 as_of_ms=as_of_ms,
@@ -234,6 +254,104 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertEqual(canonical["wallets"], wallets[:2])
             self.assertEqual(canonical["candidate_pool_hash"], report["candidate_pool_hash"])
             self.assertEqual(canonical["report_sha256"], report_sha256(saved_report))
+
+    def test_open_raw_fill_qualifies_without_a_completed_episode_gate(self):
+        as_of_ms = 1_800_000_000_000
+        wallets = [f"0x{index:040x}" for index in range(1, 7)]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = ScreenPaths(root / "reports", root / "state", root / "cache")
+            config = ScreenConfig(
+                discovery_pool_target=6,
+                discovery_pool_min=6,
+                discovery_pool_max=6,
+                leaderboard_roi_top_n=6,
+                leaderboard_pnl_top_n=6,
+                leaderboard_turnover_top_n=6,
+                prior_verified_top_n=2,
+                new_wallet_top_n=1,
+                rotating_sample_n=1,
+                ledger_verification_initial_n=4,
+                ledger_verification_expand_step=1,
+                boundary_probe_n=1,
+                candidate_count=2,
+                final_active_count=2,
+                minimum_completed_episodes=100,
+            )
+            report = WhaleScreenPipeline(
+                config,
+                paths,
+                api=OpenOnlyFillApi(as_of_ms, wallets),
+                as_of_ms=as_of_ms,
+                run_id="open-fill-qualifies",
+                progress=lambda _message: None,
+            ).run()
+            self.assertEqual(report["run_status"], "COMPLETE")
+            self.assertIsNone(report["minimum_completed_episodes"])
+            self.assertEqual(report["minimum_observed_raw_fills"], 1)
+            self.assertEqual([row["wallet"] for row in report["finalists"]], wallets[:2])
+            self.assertTrue(all(row["raw_fill_count"] == 1 for row in report["finalists"]))
+            self.assertTrue(all(row["raw_fill_coverage_complete"] is True for row in report["finalists"]))
+            self.assertTrue(all(row["raw_fill_aggregate_by_time"] is False for row in report["finalists"]))
+            self.assertTrue(paths.canonical_state.exists())
+
+    def test_partial_raw_fill_coverage_keeps_positive_activity_eligible(self):
+        class PartialPositiveFillPipeline(WhaleScreenPipeline):
+            def _fills(self, wallet):
+                return (
+                    [{
+                        "time": self.window_start_ms + 100,
+                        "coin": "BTC",
+                        "startPosition": "0",
+                        "side": "B",
+                        "sz": "1",
+                        "px": "100",
+                        "closedPnl": "0",
+                        "fee": "0",
+                        "feeToken": "USDC",
+                        "tid": 1,
+                        "oid": 1,
+                        "hash": f"{wallet}-partial-open",
+                    }],
+                    False,
+                    False,
+                    "fill pagination stalled after positive evidence",
+                )
+
+        as_of_ms = 1_800_000_000_000
+        wallets = [f"0x{index:040x}" for index in range(1, 7)]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = ScreenPaths(root / "reports", root / "state", root / "cache")
+            config = ScreenConfig(
+                discovery_pool_target=6,
+                discovery_pool_min=6,
+                discovery_pool_max=6,
+                leaderboard_roi_top_n=6,
+                leaderboard_pnl_top_n=6,
+                leaderboard_turnover_top_n=6,
+                prior_verified_top_n=2,
+                new_wallet_top_n=1,
+                rotating_sample_n=1,
+                ledger_verification_initial_n=4,
+                ledger_verification_expand_step=1,
+                boundary_probe_n=1,
+                candidate_count=2,
+                final_active_count=2,
+            )
+            report = PartialPositiveFillPipeline(
+                config,
+                paths,
+                api=FakeApi(as_of_ms, wallets),
+                as_of_ms=as_of_ms,
+                run_id="partial-fill-qualifies",
+                progress=lambda _message: None,
+            ).run()
+            self.assertEqual(report["run_status"], "COMPLETE")
+            self.assertTrue(all(row["raw_fill_count"] == 1 for row in report["finalists"]))
+            self.assertTrue(all(row["raw_fill_coverage_complete"] is False for row in report["finalists"]))
+            self.assertTrue(all(row["raw_fill_count_is_lower_bound"] is True for row in report["finalists"]))
+            self.assertTrue(paths.canonical_state.exists())
 
     def test_audited_wallet_exclusion_is_not_a_pool_transport_coverage_hole(self):
         as_of_ms = 1_800_000_000_000

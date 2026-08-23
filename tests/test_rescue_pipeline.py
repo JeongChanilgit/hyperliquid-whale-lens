@@ -9,12 +9,28 @@ WALLET = "0x" + "12" * 20
 
 
 class RescuePipelineTests(unittest.TestCase):
-    def test_exact_status_is_independent_from_activity_and_selection(self) -> None:
+    def test_one_raw_fill_qualifies_even_without_a_completed_episode(self) -> None:
         row = {"wallet": WALLET, "quality": "VERIFIED", "reason_code": "VALID", "perp_cashflow_neutral_twr_30d": "1.2", "provisional_perp_twr_30d": "1.1", "current_account_value_usd": "10000"}
         result = evaluate_account(row, fill_result={"valid": True, "raw_fill_count": 1, "completed_episodes": 0})
         self.assertEqual(result.data_quality_status.value, "VERIFIED_EXACT")
-        self.assertEqual(result.activity_status.value, "INSUFFICIENT_COMPLETED_EPISODES")
+        self.assertEqual(result.activity_status.value, "QUALIFIED")
         self.assertEqual(result.selection_status.value, "STANDBY")
+
+    def test_positive_partial_raw_fill_count_is_a_qualifying_lower_bound(self) -> None:
+        row = {"wallet": WALLET, "quality": "VERIFIED", "reason_code": "VALID", "perp_cashflow_neutral_twr_30d": "1.2", "current_account_value_usd": "10000"}
+        result = evaluate_account(
+            row,
+            fill_result={"valid": False, "raw_fill_count": 1, "raw_fill_coverage_complete": False},
+        )
+        self.assertEqual(result.activity_status.value, "QUALIFIED")
+
+    def test_complete_zero_raw_fills_is_inactive_not_episode_gated(self) -> None:
+        row = {"wallet": WALLET, "quality": "VERIFIED", "reason_code": "VALID", "perp_cashflow_neutral_twr_30d": "1.2", "current_account_value_usd": "10000"}
+        result = evaluate_account(
+            row,
+            fill_result={"valid": True, "raw_fill_count": 0, "raw_fill_coverage_complete": True},
+        )
+        self.assertEqual(result.activity_status.value, "NO_OBSERVED_RAW_FILLS")
 
     def test_boundary_failure_is_interval_rescued_without_erasing_original_reason(self) -> None:
         row = {"wallet": WALLET, "quality": "UNVERIFIABLE", "reason_code": "CASHFLOW_BOUNDARY_MISSING", "provisional_perp_twr_30d": "0.5", "current_account_value_usd": "10000"}

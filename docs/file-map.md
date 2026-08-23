@@ -21,7 +21,7 @@
   - `discovery.py`: whole-leaderboard parsing, multi-signal RRF pool, rotating-sample backfill, and persistent 1,000-wallet outside refresh shards.
   - `portfolio.py`, `ledger.py`, `twr.py`, `models.py`: `perpMonth` normalization, explicit non-funding cash-flow classification, Decimal TWR and reconciliation diagnostics.
     - Screening clips to one fixed run window and scores only real aligned observations inside it; it does not manufacture exact start/end samples.
-  - `candidate.py`, `episodes.py`, `report.py`: 2,500+500 verification state machine, TOP2000 freeze/hash, raw-fill episodes, atomic report/canonical gates.
+  - `candidate.py`, `episodes.py`, `report.py`: 2,500+500 verification state machine, TOP2000 freeze/hash, positive raw-fill activity proof, optional episode diagnostics, and atomic report/canonical gates.
   - `research.py`: explicit-user-authorization path that converts an insufficient-candidate PARTIAL run into hash-linked, SIMULATION-only TOP10/TOP50 research artifacts without writing canonical state.
   - `activity_analysis.py`: pure selection, 90-day raw-fill episode, and current all-DEX position summary helpers for activity-qualified TWR research.
   - `activity_census.py`: fail-closed whole-preserved-set fill-presence census, terminal coverage accounting, and exact-TWR TOP10 selection.
@@ -33,6 +33,7 @@
 - `src/collect_simple_twr_top10_dossier.py`: bounded official-public-API evidence collector for the isolated portfolio-only TOP10.
 - `src/whale_lens/dossier_analysis.py`: fact/inference-separated position, order, fill, episode, cash-flow, drawdown, and copyability analysis.
 - `src/render_simple_twr_top10_dossier.py`: standalone offline HTML briefing renderer.
+- `src/whale_lens/twr_3d_data.py`, `src/render_simple_twr_3d.py`: +300% research cohort enrichment and standalone rotatable 3D return/MDD/raw-fill map.
 - `src/scan_preserved_account_activity.py`: resume-safe fixed-window activity census; reuses positive official month-volume proof, raw-checks zero-volume accounts, and writes a replacement cohort only after all preserved accounts are terminal.
 - `src/analyze_filled_twr_top10_90d.py`: bounded public-data CLI that saves the TWR-ordered, recent-fill TOP10 90-day activity report without changing canonical or runner state.
 - `tests/test_*.py`: unit and integration coverage for cash flows, TWR examples, discovery, resume/cache, candidate boundary probes, raw episodes, and complete canonical publication.
@@ -46,6 +47,7 @@
 - `reports/perp-twr-trade-qualified/`: hash-linked exact-TWR, raw-fill-qualified research TOP10; SIMULATION-only.
 - `reports/perp-month-simple-twr/`: full 6,272-wallet portfolio-only estimate, exclusion counts, TOP10, and Markdown summary; research-only.
   - `top10-dossier-data.json`, `top10-dossier.html`: current-state/30-day fill, episode, order, position, concentration, and risk briefing; never a runner input.
+  - `twr-300-plus-3d-data.json`, `twr-300-plus-3d.html`: +300% cohort 3-axis research map; raw fill count uses one unaggregated perpetual fill row as one trade and is never a runner input.
 - `state/account-evidence-registry/`: append-only account histories, content-addressed raw references, immutable run manifests, and deterministic rescue queue.
 - `state/perp-twr-trade-qualified/`: SIMULATION-only TOP10 state for the explicit one-or-more-30D-fill research run.
 - `state/perp-twr-activity-census/`: atomic resume checkpoint for the all-preserved-account activity census.

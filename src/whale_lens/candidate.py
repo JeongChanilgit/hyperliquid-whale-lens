@@ -20,7 +20,10 @@ REASON_BOUNDARY_BREACH = "BOUNDARY_BREACH"
 REASON_BOUNDARY_UNSTABLE = "BOUNDARY_UNSTABLE"
 REASON_INSUFFICIENT_VERIFIED = "INSUFFICIENT_VERIFIED_CANDIDATES"
 REASON_OUTSIDE_POOL_BREACH = "OUTSIDE_POOL_THRESHOLD_BREACH"
-REASON_FEWER_THAN_EPISODES = "FEWER_THAN_10_COMPLETED_EPISODES"
+REASON_NO_OBSERVED_RAW_FILLS = "NO_OBSERVED_RAW_FILLS"
+REASON_RAW_FILL_COUNT_MISSING = "RAW_FILL_COUNT_MISSING"
+REASON_RAW_FILL_COVERAGE_MISSING = "RAW_FILL_COVERAGE_MISSING"
+REASON_RAW_FILL_AGGREGATION_UNVERIFIED = "RAW_FILL_AGGREGATION_UNVERIFIED"
 REASON_INSUFFICIENT_FINALISTS = "INSUFFICIENT_FINALISTS"
 
 
@@ -463,16 +466,38 @@ class FinalistValidationResult:
     reason_code: str | None = None
 
 
-def _validation_fields(value: Any) -> tuple[bool, int, int | None, str | None, str | None]:
+def _validation_fields(
+    value: Any,
+) -> tuple[bool, int | None, int | None, bool | None, bool | None, str | None, str | None]:
     if isinstance(value, Mapping):
         valid = bool(value.get("valid", value.get("coverage_complete", True)))
-        episodes = value.get("completed_episodes", value.get("episode_count", 0))
+        episodes = value.get("completed_episodes", value.get("episode_count"))
         raw_count = value.get("raw_fill_count")
-        return valid, int(episodes), int(raw_count) if raw_count is not None else None, value.get("reason_code"), value.get("reason_message")
+        coverage_complete = value.get("raw_fill_coverage_complete", value.get("coverage_complete"))
+        aggregate_by_time = value.get("raw_fill_aggregate_by_time")
+        return (
+            valid,
+            int(episodes) if episodes is not None else None,
+            int(raw_count) if raw_count is not None else None,
+            coverage_complete if isinstance(coverage_complete, bool) else None,
+            aggregate_by_time if isinstance(aggregate_by_time, bool) else None,
+            value.get("reason_code"),
+            value.get("reason_message"),
+        )
     valid = bool(getattr(value, "valid", True))
-    episodes = int(getattr(value, "completed_episodes", getattr(value, "episode_count", 0)))
+    episodes = getattr(value, "completed_episodes", getattr(value, "episode_count", None))
     raw_count = getattr(value, "raw_fill_count", None)
-    return valid, episodes, int(raw_count) if raw_count is not None else None, getattr(value, "reason_code", None), getattr(value, "reason_message", None)
+    coverage_complete = getattr(value, "raw_fill_coverage_complete", getattr(value, "coverage_complete", None))
+    aggregate_by_time = getattr(value, "raw_fill_aggregate_by_time", None)
+    return (
+        valid,
+        int(episodes) if episodes is not None else None,
+        int(raw_count) if raw_count is not None else None,
+        coverage_complete if isinstance(coverage_complete, bool) else None,
+        aggregate_by_time if isinstance(aggregate_by_time, bool) else None,
+        getattr(value, "reason_code", None),
+        getattr(value, "reason_message", None),
+    )
 
 
 def validate_candidates_until_finalists(
@@ -480,16 +505,23 @@ def validate_candidates_until_finalists(
     fill_validator: Callable[[Mapping[str, Any]], Any],
     *,
     target_count: int = 10,
-    minimum_completed_episodes: int = 10,
+    minimum_raw_fills: int = 1,
+    minimum_completed_episodes: int | None = None,
     fill_validation_mode: str = "UNTIL_10",
 ) -> FinalistValidationResult:
-    """Validate candidate ranks in order and choose the first qualifying N."""
+    """Choose the first rank-ordered candidates with observed raw-fill activity.
+
+    ``minimum_completed_episodes`` is retained as an ignored compatibility
+    argument.  Episode reconstruction is diagnostic-only.  A validator must
+    fail closed when incomplete coverage prevents a zero-activity conclusion,
+    while any observed ``aggregateByTime:false`` raw fill is positive proof.
+    """
 
     mode = fill_validation_mode.upper()
     if mode not in {"UNTIL_10", "FULL_2000"}:
         raise ValueError("fill_validation_mode must be UNTIL_10 or FULL_2000")
-    if min(target_count, minimum_completed_episodes) <= 0:
-        raise ValueError("target_count and minimum_completed_episodes must be positive")
+    if target_count <= 0 or minimum_raw_fills <= 0:
+        raise ValueError("target_count and minimum_raw_fills must be positive")
     ordered = [_row(row) for row in candidates]
     ordered.sort(key=lambda row: (int(row.get("candidate_rank", 2**31 - 1)), _wallet(row).lower()))
     finalists: list[dict[str, Any]] = []
@@ -498,22 +530,59 @@ def validate_candidates_until_finalists(
         if mode == "UNTIL_10" and len(finalists) >= target_count:
             break
         row = dict(candidate)
+        outcome: Any = None
         try:
             outcome = fill_validator(row)
-            valid, episodes, raw_count, reason_code, reason_message = _validation_fields(outcome)
+            valid, episodes, raw_count, coverage_complete, aggregate_by_time, reason_code, reason_message = _validation_fields(outcome)
         except Exception as exc:
-            valid, episodes, raw_count = False, 0, None
+            valid, episodes, raw_count, coverage_complete, aggregate_by_time = False, None, None, None, None
             reason_code, reason_message = "FILL_VALIDATION_ERROR", str(exc)
-        row["completed_episodes"] = episodes
+        if episodes is not None:
+            row["completed_episodes"] = episodes
         if raw_count is not None:
             row["raw_fill_count"] = raw_count
+        if coverage_complete is not None:
+            row["raw_fill_coverage_complete"] = coverage_complete
+        if aggregate_by_time is not None:
+            row["raw_fill_aggregate_by_time"] = aggregate_by_time
+        if isinstance(outcome, Mapping):
+            for key in (
+                "raw_fill_coverage_complete",
+                "raw_fill_aggregate_by_time",
+                "raw_fill_activity_observed",
+                "observed_raw_fill_count",
+                "raw_fill_count_is_lower_bound",
+                "episode_diagnostic_valid",
+                "episode_diagnostic_reason_code",
+                "episode_diagnostic_reason_message",
+            ):
+                if key in outcome:
+                    row[key] = outcome[key]
         if not valid:
             row.update(status="UNVERIFIABLE", reason_code=reason_code or "FILL_PAGINATION_INCOMPLETE", reason_message=reason_message)
-        elif episodes < minimum_completed_episodes:
+        elif raw_count is None:
+            row.update(
+                status="UNVERIFIABLE",
+                reason_code=REASON_RAW_FILL_COUNT_MISSING,
+                reason_message="complete raw-fill coverage did not include an observed fill count",
+            )
+        elif coverage_complete is None:
+            row.update(
+                status="UNVERIFIABLE",
+                reason_code=REASON_RAW_FILL_COVERAGE_MISSING,
+                reason_message="raw-fill coverage diagnostic is missing",
+            )
+        elif aggregate_by_time is not False:
+            row.update(
+                status="UNVERIFIABLE",
+                reason_code=REASON_RAW_FILL_AGGREGATION_UNVERIFIED,
+                reason_message="raw-fill evidence must be collected with aggregateByTime:false",
+            )
+        elif raw_count < minimum_raw_fills:
             row.update(
                 status="DROP",
-                reason_code=REASON_FEWER_THAN_EPISODES,
-                reason_message=f"fewer than {minimum_completed_episodes} completed episodes",
+                reason_code=REASON_NO_OBSERVED_RAW_FILLS,
+                reason_message=f"fewer than {minimum_raw_fills} observed raw fills",
             )
         elif len(finalists) < target_count:
             row.update(status="ACTIVE", reason_code=None, reason_message=None)

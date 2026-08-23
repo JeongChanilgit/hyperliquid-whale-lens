@@ -79,7 +79,10 @@ class ScreenConfig:
     boundary_probe_n: int = 100
     candidate_count: int = 2000
     final_active_count: int = 10
-    minimum_completed_episodes: int = 10
+    minimum_observed_raw_fills: int = 1
+    # Legacy compatibility only.  Episode counts remain in diagnostics but
+    # never influence candidate selection or publication.
+    minimum_completed_episodes: int | None = None
     fill_validation_mode: str = "UNTIL_10"
     strict_cashflow_boundaries: bool = True
     portfolio_request_budget: int = 8000
@@ -104,7 +107,7 @@ class ScreenConfig:
             self.boundary_probe_n,
             self.candidate_count,
             self.final_active_count,
-            self.minimum_completed_episodes,
+            self.minimum_observed_raw_fills,
             self.outside_shard_size,
         ):
             if value <= 0:
@@ -113,7 +116,11 @@ class ScreenConfig:
             raise ValueError("outside_shard_size must be between 1000 and 2000")
 
     def hash_payload(self) -> dict[str, Any]:
-        return to_jsonable(asdict(self))
+        payload = to_jsonable(asdict(self))
+        # Treat historical episode thresholds as semantically inert so a
+        # resume is not invalidated by an ignored compatibility setting.
+        payload["minimum_completed_episodes"] = None
+        return payload
 
     @property
     def config_hash(self) -> str:
@@ -501,24 +508,87 @@ class WhaleScreenPipeline:
         wallet = str(candidate["wallet"])
         try:
             fills, complete, limit, message = self._fills(wallet)
-            result = reconstruct_completed_episodes(
-                fills,
-                self.window_start_ms,
-                self.window_end_ms,
-                aggregate_by_time=False,
-                coverage_complete=complete,
-                availability_limit_reached=limit,
-            )
+            episode_payload: dict[str, Any]
+            try:
+                result = reconstruct_completed_episodes(
+                    fills,
+                    self.window_start_ms,
+                    self.window_end_ms,
+                    aggregate_by_time=False,
+                    coverage_complete=complete,
+                    availability_limit_reached=limit,
+                )
+                episode_payload = asdict(result)
+            except Exception as exc:
+                # Episode reconstruction is useful diagnostics, but a
+                # reconstruction failure cannot override complete observed
+                # raw-fill evidence.
+                episode_payload = {
+                    "completed_episodes": None,
+                    "episode_diagnostic_valid": False,
+                    "episode_diagnostic_reason_code": getattr(exc, "reason_code", "EPISODE_RECONSTRUCTION_ERROR"),
+                    "episode_diagnostic_reason_message": str(exc),
+                }
+            raw_fill_count = len(fills)
+            raw_fill_coverage_complete = complete and not limit
+            raw_fill_activity_observed = raw_fill_count >= self.config.minimum_observed_raw_fills
+            # Positive raw evidence is monotonic: a real unaggregated fill is
+            # enough to prove activity even when later pages are truncated.
+            # Coverage only governs whether zero/exact-count conclusions are
+            # safe, never whether an already observed fill qualifies.
+            raw_validation_valid = raw_fill_activity_observed or raw_fill_coverage_complete
+            if raw_fill_activity_observed:
+                raw_reason_code = None
+                raw_reason_message = None
+            elif not raw_fill_coverage_complete:
+                raw_reason_code = "FILL_PAGINATION_INCOMPLETE"
+                raw_reason_message = message or "raw-fill coverage is incomplete"
+            else:
+                raw_reason_code = "NO_OBSERVED_RAW_FILLS"
+                raw_reason_message = f"fewer than {self.config.minimum_observed_raw_fills} observed raw fills"
+            episode_valid = episode_payload.get("episode_diagnostic_valid", episode_payload.get("valid"))
+            episode_reason_code = episode_payload.get("episode_diagnostic_reason_code", episode_payload.get("reason_code"))
+            episode_reason_message = episode_payload.get("episode_diagnostic_reason_message", episode_payload.get("reason_message"))
+            outcome = {
+                **episode_payload,
+                "valid": raw_validation_valid,
+                "raw_fill_count": raw_fill_count,
+                "observed_raw_fill_count": raw_fill_count,
+                "raw_fill_count_is_lower_bound": not raw_fill_coverage_complete,
+                "raw_fill_coverage_complete": raw_fill_coverage_complete,
+                "raw_fill_aggregate_by_time": False,
+                "raw_fill_activity_observed": raw_fill_activity_observed,
+                "episode_diagnostic_valid": episode_valid,
+                "episode_diagnostic_reason_code": episode_reason_code,
+                "episode_diagnostic_reason_message": episode_reason_message,
+                "reason_code": raw_reason_code,
+                "reason_message": raw_reason_message,
+            }
             self.cache.put(
                 self._cache_key(wallet, "fills-normalized-episodes"),
-                {"raw_fills": fills, "result": to_jsonable(result), "coverage_complete": complete, "availability_limit_reached": limit},
+                {
+                    "raw_fills": fills,
+                    "result": to_jsonable(episode_payload),
+                    "raw_validation": to_jsonable(outcome),
+                    "coverage_complete": complete,
+                    "availability_limit_reached": limit,
+                },
             )
-            if message and not result.valid:
-                return {**asdict(result), "reason_message": message}
-            return result
+            return outcome
         except Exception as exc:
             self._error_row(wallet, "fills", exc)
-            return {"valid": False, "completed_episodes": 0, "reason_code": getattr(exc, "reason_code", "FILL_VALIDATION_ERROR"), "reason_message": str(exc)}
+            return {
+                "valid": False,
+                "completed_episodes": None,
+                "raw_fill_count": None,
+                "observed_raw_fill_count": None,
+                "raw_fill_count_is_lower_bound": None,
+                "raw_fill_coverage_complete": False,
+                "raw_fill_aggregate_by_time": False,
+                "raw_fill_activity_observed": False,
+                "reason_code": getattr(exc, "reason_code", "FILL_VALIDATION_ERROR"),
+                "reason_message": str(exc),
+            }
 
     def run(self) -> dict[str, Any]:
         self.progress(f"[{self.run_id}] fixed as_of={self.as_of_ms} window={self.window_start_ms}..{self.window_end_ms}")
@@ -717,6 +787,8 @@ class WhaleScreenPipeline:
             "metric_version": METRIC_VERSION,
             "coverage_mode": self.config.coverage_mode,
             "candidate_pool_hash": freeze.candidate_pool_hash,
+            "minimum_completed_episodes": None,
+            "minimum_observed_raw_fills": self.config.minimum_observed_raw_fills,
             **freeze.as_dict(),
         }
         self.paths.candidate_reports.mkdir(parents=True, exist_ok=True)
@@ -727,7 +799,7 @@ class WhaleScreenPipeline:
             freeze.candidates,
             self._validate_fills,
             target_count=self.config.final_active_count,
-            minimum_completed_episodes=self.config.minimum_completed_episodes,
+            minimum_raw_fills=self.config.minimum_observed_raw_fills,
             fill_validation_mode=self.config.fill_validation_mode,
         ) if freeze.candidate_pool_complete else None
         successful_shard_wallets = {
@@ -798,7 +870,8 @@ class WhaleScreenPipeline:
             "candidate_count_actual": freeze.candidate_count_actual,
             "candidate_pool_complete": freeze.candidate_pool_complete,
             "candidate_pool_hash": freeze.candidate_pool_hash,
-            "minimum_completed_episodes": self.config.minimum_completed_episodes,
+            "minimum_completed_episodes": None,
+            "minimum_observed_raw_fills": self.config.minimum_observed_raw_fills,
             "target_count": self.config.final_active_count,
             "fill_validation_mode": self.config.fill_validation_mode,
             "fills_scanned_candidate_count": finalists.fills_scanned_candidate_count if finalists else 0,
@@ -829,11 +902,17 @@ class WhaleScreenPipeline:
             finalist_rows=finalists.finalists if finalists else (),
             errors=self.errors,
         )
+        # The rescue builder still accepts a historical integer threshold.
+        # Feed it zero solely as a no-op compatibility shim; published
+        # screening artifacts retain the explicit ``None`` policy.
+        rescue_source_report = dict(report)
+        rescue_source_report["minimum_completed_episodes"] = 0
         rescue_report = build_rescue_report(
-            report,
+            rescue_source_report,
             cache=self.cache,
             registry=self.evidence_registry,
         )
+        rescue_report["minimum_completed_episodes"] = None
         rescue_run_json = self.paths.rescue_reports / f"run-{self.run_id}.json"
         rescue_run_md = self.paths.rescue_reports / f"run-{self.run_id}.md"
         write_json_atomic(rescue_run_json, rescue_report)

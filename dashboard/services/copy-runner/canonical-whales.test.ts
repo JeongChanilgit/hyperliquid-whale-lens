@@ -115,6 +115,7 @@ test("accepts an explicitly authorized partial research TOP 10 only through the 
       rank: index + 1,
       candidate_rank: index + 1,
       completed_episodes: 10,
+      raw_fill_count: 1,
       status: "ACTIVE",
       quality: "VERIFIED",
       perp_cashflow_neutral_twr_30d: String(1 - index / 100),
@@ -166,11 +167,11 @@ test("accepts an explicitly authorized partial research TOP 10 only through the 
     assert.equal(loaded.researchOverride, true);
     assert.equal(loaded.selectionMode, "VERIFIED_PARTIAL_RESEARCH");
 
-    finalists[0]!.completed_episodes = 9;
+    finalists[0]!.raw_fill_count = 0;
     writeFileSync(statePath, JSON.stringify({ ...state, finalists }));
     assert.throws(() => loadCanonicalTop10({
       statePath, reportPath, candidatePath, nowMs: 1_800_000_100_000, maxAgeMs: 200_000,
       allowPartialResearch: true,
-    }), /at least 10 completed episodes/);
+    }), /raw_fill_count must be a positive integer/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

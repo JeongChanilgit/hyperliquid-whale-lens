@@ -65,7 +65,14 @@ class PartialResearchActivationTests(unittest.TestCase):
                 research_report_path=root / "research-report.json",
                 research_candidate_path=root / "research-candidates.json",
                 research_state_path=root / "research-state.json",
-                fill_validator=lambda row: {"valid": True, "completed_episodes": 10, "raw_fill_count": 20},
+                fill_validator=lambda row: {
+                    "valid": True,
+                    "completed_episodes": 0,
+                    "raw_fill_count": 1,
+                    "raw_fill_coverage_complete": False,
+                    "raw_fill_aggregate_by_time": False,
+                    "raw_fill_count_is_lower_bound": True,
+                },
                 target_count=2,
                 standby_count=2,
                 authorized_at_utc="2026-08-21T03:00:00+00:00",
@@ -76,6 +83,13 @@ class PartialResearchActivationTests(unittest.TestCase):
             self.assertEqual(result["state"]["wallets"], [f"0x{1:040x}", f"0x{2:040x}"])
             self.assertEqual(len(result["candidate"]["candidates"]), 4)
             self.assertEqual(result["report"]["run_status"], "PARTIAL_RESEARCH_OVERRIDE")
+            self.assertIsNone(result["candidate"]["minimum_completed_episodes"])
+            self.assertIsNone(result["report"]["minimum_completed_episodes"])
+            self.assertIsNone(result["state"]["minimum_completed_episodes"])
+            self.assertEqual(result["report"]["minimum_observed_raw_fills"], 1)
+            self.assertEqual(result["report"]["finalists"][0]["completed_episodes"], 0)
+            self.assertFalse(result["report"]["finalists"][0]["raw_fill_coverage_complete"])
+            self.assertTrue(result["report"]["finalists"][0]["raw_fill_count_is_lower_bound"])
             self.assertTrue((root / "research-state.json").is_file())
 
     def test_refuses_any_partial_reason_other_than_insufficient_verified(self) -> None:
@@ -89,7 +103,13 @@ class PartialResearchActivationTests(unittest.TestCase):
                     research_report_path=root / "research-report.json",
                     research_candidate_path=root / "research-candidates.json",
                     research_state_path=root / "research-state.json",
-                    fill_validator=lambda row: {"valid": True, "completed_episodes": 10},
+                    fill_validator=lambda row: {
+                        "valid": True,
+                        "completed_episodes": 10,
+                        "raw_fill_count": 1,
+                        "raw_fill_coverage_complete": True,
+                        "raw_fill_aggregate_by_time": False,
+                    },
                     target_count=2,
                     standby_count=2,
                 )
