@@ -1,0 +1,41 @@
+{
+  "mode": "PAPER",
+  "testnet": false,
+  "consoleLog": true,
+  "pairs": [
+    {
+      "pairId": "whale-1",
+      "sourceAddress": "0x1111111111111111111111111111111111111111",
+      "targetAddress": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "capitalUsd": 100
+    }
+  ],
+  "actorConfig": {
+    "immediateResidualNotionalUsd": 10,
+    "targetPositionToleranceBps": 5,
+    "verificationDelayMs": 250,
+    "terminalVerificationDelayMs": 1000,
+    "maxCatchUpSlippageBps": 50,
+    "killOnTerminalResidual": true
+  },
+  "runtime": {
+    "heartbeatMs": 20000,
+    "staleConnectionMs": 50000,
+    "reconnectMaxMs": 30000,
+    "allowApproxUnified": false
+  },
+  "paper": {
+    "takerFeeRate": 0.00045,
+    "makerFeeRate": 0.00015,
+    "defaultSlippageBps": 50
+  },
+  "audit": {
+    "eventsPath": "data/faithful-mirror-v2/events.jsonl",
+    "snapshotPath": "data/faithful-mirror-v2/latest-state.json",
+    "snapshotIntervalMs": 5000
+  },
+  "control": {
+    "host": "127.0.0.1",
+    "port": 8790
+  }
+}
