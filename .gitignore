@@ -66,6 +66,11 @@ logs/
 !/reports/perp-twr-trade-qualified/
 !/reports/perp-twr-trade-qualified/latest.json
 !/reports/perp-twr-trade-qualified/run-*.json
+!/reports/perp-month-simple-twr/
+!/reports/perp-month-simple-twr/latest.json
+!/reports/perp-month-simple-twr/latest.md
+!/reports/perp-month-simple-twr/perp-month-simple-twr-*.json
+!/reports/perp-month-simple-twr/perp-month-simple-twr-*.md
 /state/**
 !/state/perp-twr-top10/
 !/state/perp-twr-top10/latest_active_top10.json
@@ -73,6 +78,9 @@ logs/
 !/state/perp-twr-research/latest_active_top10.json
 !/state/perp-twr-trade-qualified/
 !/state/perp-twr-trade-qualified/latest_active_top10.json
+!/state/perp-month-simple-twr/
+!/state/perp-month-simple-twr/latest.json
+!/state/perp-month-simple-twr/latest.md
 
 # Local packaging/caches
 work/
