@@ -17,6 +17,7 @@ DEFAULT_CACHE_ROOT = Path("state/perp-twr-cache/portfolio")
 DEFAULT_COUNTS = Path("state/perp-month-simple-twr/twr-3d-count-evidence.json")
 DEFAULT_DATA = Path("reports/perp-month-simple-twr/twr-300-plus-3d-data.json")
 DEFAULT_HTML = Path("reports/perp-month-simple-twr/twr-300-plus-3d.html")
+DEFAULT_EXCLUDED_RANKS = (1,)
 
 
 def _read_json(path: Path) -> Any:
@@ -165,7 +166,7 @@ button,select{font:inherit}.shell{max-width:1500px;margin:0 auto;padding:22px}.t
 @media(max-width:900px){.top{align-items:flex-start;flex-direction:column}.plot,.plot canvas{min-height:560px;height:560px}.detail{grid-template-columns:repeat(2,1fr)}.detail>div{border-bottom:1px solid var(--line)}.detail .identity{grid-column:1/-1}.note{flex-direction:column;gap:4px}}
 @media(max-width:520px){.shell{padding:12px}.plot,.plot canvas{min-height:480px;height:480px}.detail{grid-template-columns:1fr}.detail .identity{grid-column:auto}}
 </style></head><body><main class="shell">
-<header class="top"><div><div class="eyebrow">Whale Lens · Research only</div><h1>300%+ 계좌 3D 성과 지도</h1><div class="sub">드래그해서 회전하고 휠로 확대하세요. X 수익률 · Y 단순 TWR MDD · Z 원시 체결 수(log10).</div></div><div class="tools"><select id="walletSelect" aria-label="계좌 선택"></select><button id="reset" type="button">뷰 초기화</button></div></header>
+<header class="top"><div><div class="eyebrow">Whale Lens · Research only</div><h1>1위 제외 · 300%+ 계좌 3D 성과 지도</h1><div class="sub">보이는 23개 계좌 범위로 세 축을 다시 맞췄습니다. 드래그 회전 · 휠 확대 · X 수익률 · Y 단순 TWR MDD · Z 원시 체결 수(log10).</div></div><div class="tools"><select id="walletSelect" aria-label="계좌 선택"></select><button id="reset" type="button">뷰 초기화</button></div></header>
 <section class="plot"><canvas id="scene" role="img" aria-label="수익률, 최대 낙폭, 로그 거래 횟수를 나타내는 3차원 산점도"></canvas><div class="legend"><b id="countLabel"></b> · 점을 선택하면 세부값 표시</div><div class="tooltip" id="tooltip" role="tooltip"></div></section>
 <section class="detail" id="detail" aria-live="polite"></section>
 <footer class="note"><span>수익률·MDD는 portfolio-only 단순 TWR 연구값이며 입출금 원장 검증값이 아닙니다.</span><span id="provenance"></span></footer>
@@ -176,7 +177,7 @@ const canvas=document.getElementById('scene'),ctx=canvas.getContext('2d'),tip=do
 if(!points.length)throw new Error('No plotted records');
 const n=v=>Number(v),fmt=(v,d=1)=>Number.isFinite(n(v))?n(v).toLocaleString('ko-KR',{maximumFractionDigits:d}):'—',money=v=>Number.isFinite(n(v))?'$'+fmt(v,0):'—',short=a=>a.slice(0,7)+'…'+a.slice(-5);
 const xs=points.map(p=>n(p.return_pct)),ys=points.map(p=>n(p.mdd_pct)),zs=points.map(p=>n(p.trade_count_plot_log10));
-const extent=a=>{let lo=Math.min(...a),hi=Math.max(...a);if(lo===hi){lo-=1;hi+=1}return[lo,hi]},xd=extent(xs),yd=[0,Math.max(100,...ys)],zd=extent(zs),norm=(v,d)=>-1+2*(v-d[0])/(d[1]-d[0]);
+const extent=a=>{let lo=Math.min(...a),hi=Math.max(...a);if(lo===hi){const half=Math.max(1,Math.abs(lo)*.05);return[lo-half,hi+half]}const pad=(hi-lo)*.06;return[lo-pad,hi+pad]},xd=extent(xs),yd=extent(ys),zd=extent(zs),norm=(v,d)=>-1+2*(v-d[0])/(d[1]-d[0]);
 points.forEach(p=>p.pos={x:norm(n(p.return_pct),xd),y:norm(n(p.mdd_pct),yd),z:norm(n(p.trade_count_plot_log10),zd)});
 let yaw=-.68,pitch=.42,zoom=1,selected=points[0],hovered=null,drag=false,moved=false,lastX=0,lastY=0,projected=[];
 function theme(name){return getComputedStyle(document.documentElement).getPropertyValue(name).trim()}
@@ -203,6 +204,36 @@ document.getElementById('countLabel').textContent=`${points.length}개 계좌`;c
     return template.replace("__DATA__", data)
 
 
+def apply_presentation_filter(
+    dataset: Mapping[str, Any], excluded_ranks: Sequence[int]
+) -> dict[str, Any]:
+    """Remove display-only outliers while preserving their source ranks."""
+
+    filtered = deepcopy(dataset)
+    excluded = {int(rank) for rank in excluded_ranks}
+    if any(rank <= 0 for rank in excluded):
+        raise ValueError("excluded ranks must be positive integers")
+    source_records = list(filtered["records"])
+    removed = [row for row in source_records if int(row["rank"]) in excluded]
+    missing_ranks = excluded - {int(row["rank"]) for row in removed}
+    if missing_ranks:
+        raise ValueError("excluded ranks were absent: " + ", ".join(map(str, sorted(missing_ranks))))
+    filtered["records"] = [row for row in source_records if int(row["rank"]) not in excluded]
+    filtered["record_count"] = len(filtered["records"])
+    filtered["plot_record_count"] = sum(bool(row["plot_eligible"]) for row in filtered["records"])
+    filtered["presentation_filter"] = {
+        "source_qualifying_record_count": len(source_records),
+        "excluded_ranks": sorted(excluded),
+        "excluded_wallets": [row["wallet"] for row in removed],
+        "excluded_returns_pct": [row["return_pct"] for row in removed],
+        "axis_domains_recomputed_from_visible_records": True,
+        "remaining_ranks_preserved": True,
+    }
+    if not filtered["records"]:
+        raise ValueError("presentation filter removed every record")
+    return filtered
+
+
 def build(
     *,
     report_path: Path = DEFAULT_REPORT,
@@ -210,6 +241,7 @@ def build(
     count_path: Path = DEFAULT_COUNTS,
     data_path: Path = DEFAULT_DATA,
     html_path: Path = DEFAULT_HTML,
+    excluded_ranks: Sequence[int] = DEFAULT_EXCLUDED_RANKS,
 ) -> dict[str, Any]:
     report = _read_json(report_path)
     counts = _read_json(count_path)
@@ -217,6 +249,7 @@ def build(
     dataset = build_twr_3d_dataset(enriched)
     if dataset["record_count"] != dataset["plot_record_count"]:
         raise ValueError("not every retained +300% wallet has all three axes")
+    dataset = apply_presentation_filter(dataset, excluded_ranks)
     data_path.parent.mkdir(parents=True, exist_ok=True)
     data_path.write_text(json.dumps(dataset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     html = render_html(dataset)
@@ -236,8 +269,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--counts", type=Path, default=DEFAULT_COUNTS)
     parser.add_argument("--data-output", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--html-output", type=Path, default=DEFAULT_HTML)
+    parser.add_argument("--exclude-rank", type=int, action="append", default=list(DEFAULT_EXCLUDED_RANKS))
     args = parser.parse_args(argv)
-    print(json.dumps(build(report_path=args.report, cache_dir=args.cache_dir, count_path=args.counts, data_path=args.data_output, html_path=args.html_output), ensure_ascii=False, indent=2))
+    print(json.dumps(build(report_path=args.report, cache_dir=args.cache_dir, count_path=args.counts, data_path=args.data_output, html_path=args.html_output, excluded_ranks=args.exclude_rank), ensure_ascii=False, indent=2))
     return 0
 
 

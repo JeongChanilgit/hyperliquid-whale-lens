@@ -29,42 +29,9 @@
     "proxy_is_not_a_trade_axis_substitute": true,
     "plot_gate": "requires available MDD and a positive observed raw perpetual fill count; partial coverage is plotted as a lower bound"
   },
-  "record_count": 24,
-  "plot_record_count": 24,
+  "record_count": 23,
+  "plot_record_count": 23,
   "records": [
-    {
-      "wallet": "0x40f20b734d7d25ba0b6219e921382fa992a56a9e",
-      "rank": 1,
-      "source_rank": null,
-      "return_fraction": "329.7278548217102404860281329",
-      "return_pct": 32972.78548217102,
-      "mdd_pct": 55.975771956750364,
-      "mdd_status": "AVAILABLE",
-      "mdd_basis": "maximum drawdown of the simple-TWR index built from exact aligned account/PnL samples; portfolio-only and not ledger cash-flow-neutral verified",
-      "mdd_missing_reason": null,
-      "trade_count_raw": 13388,
-      "trade_count_status": "AVAILABLE_OBSERVED_LOWER_BOUND",
-      "trade_count_basis": "observed lower-bound deduplicated aggregateByTime:false perpetual fill rows; one row equals one trade",
-      "trade_count_missing_reason": null,
-      "trade_count_plot_log10": 4.12671570368574,
-      "trade_count_proxy_raw": 47,
-      "trade_count_proxy_status": "AVAILABLE_PROXY_NOT_EXACT_TRADE_COUNT",
-      "trade_count_proxy_basis": "pnl_changing_interval_count",
-      "trade_count_proxy_caveat": "Counts exact timestamp-aligned PnL-changing intervals, not fills or trades.",
-      "trade_count_proxy_plot_log10": 1.6720978579357175,
-      "raw_perpetual_fill_count_30d": 13388,
-      "trade_count_coverage_status": "PARTIAL",
-      "latest_account_value_usd": 1960533.154653,
-      "perp_month_vlm_usd": 387855998.05,
-      "aligned_sample_count": 48,
-      "implied_flow_max_relative": 28.206655260702046,
-      "plot_eligible": true,
-      "plot_exclusion_reasons": [],
-      "research_only": true,
-      "data_quality": "PORTFOLIO_ONLY_ESTIMATE",
-      "activity_evidence": "PERP_MONTH_VLM_POSITIVE",
-      "cashflow_neutral_verified": false
-    },
     {
       "wallet": "0x9f5777bb808871052c2c5fc13d37d05e67fbc70e",
       "rank": 2,
@@ -824,5 +791,19 @@
       "activity_evidence": "PERP_MONTH_VLM_POSITIVE",
       "cashflow_neutral_verified": false
     }
-  ]
+  ],
+  "presentation_filter": {
+    "source_qualifying_record_count": 24,
+    "excluded_ranks": [
+      1
+    ],
+    "excluded_wallets": [
+      "0x40f20b734d7d25ba0b6219e921382fa992a56a9e"
+    ],
+    "excluded_returns_pct": [
+      32972.78548217102
+    ],
+    "axis_domains_recomputed_from_visible_records": true,
+    "remaining_ranks_preserved": true
+  }
 }
