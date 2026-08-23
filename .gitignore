@@ -71,6 +71,8 @@ logs/
 !/reports/perp-month-simple-twr/latest.md
 !/reports/perp-month-simple-twr/perp-month-simple-twr-*.json
 !/reports/perp-month-simple-twr/perp-month-simple-twr-*.md
+!/reports/perp-month-simple-twr/top10-dossier-data.json
+!/reports/perp-month-simple-twr/top10-dossier.html
 /state/**
 !/state/perp-twr-top10/
 !/state/perp-twr-top10/latest_active_top10.json

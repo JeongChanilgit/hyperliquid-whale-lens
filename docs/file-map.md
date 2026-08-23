@@ -30,6 +30,9 @@
 - `src/run_account_preservation_rescue.py`: regenerate full/compact rescue reports and the hash-linked, simulation-only exact-TWR TOP10 with at least one raw 30D fill.
 - `src/run_simple_perp_month_twr.py`: cache-only, exact-timestamp `perpMonth` TWR research runner; writes isolated non-canonical outputs and never changes copy-runner state.
 - `src/whale_lens/simple_perp_month.py`: strict V4 raw-cache resolver, simplified `delta PnL / previous equity` compounding, anomaly gates, flow diagnostics, deterministic TOP10, and atomic research artifact writers.
+- `src/collect_simple_twr_top10_dossier.py`: bounded official-public-API evidence collector for the isolated portfolio-only TOP10.
+- `src/whale_lens/dossier_analysis.py`: fact/inference-separated position, order, fill, episode, cash-flow, drawdown, and copyability analysis.
+- `src/render_simple_twr_top10_dossier.py`: standalone offline HTML briefing renderer.
 - `src/scan_preserved_account_activity.py`: resume-safe fixed-window activity census; reuses positive official month-volume proof, raw-checks zero-volume accounts, and writes a replacement cohort only after all preserved accounts are terminal.
 - `src/analyze_filled_twr_top10_90d.py`: bounded public-data CLI that saves the TWR-ordered, recent-fill TOP10 90-day activity report without changing canonical or runner state.
 - `tests/test_*.py`: unit and integration coverage for cash flows, TWR examples, discovery, resume/cache, candidate boundary probes, raw episodes, and complete canonical publication.
@@ -42,6 +45,7 @@
 - `reports/perp-twr-rescue/`: full local evidence report plus compact summary and Markdown; the full JSON is intentionally not dashboard or GitHub payload.
 - `reports/perp-twr-trade-qualified/`: hash-linked exact-TWR, raw-fill-qualified research TOP10; SIMULATION-only.
 - `reports/perp-month-simple-twr/`: full 6,272-wallet portfolio-only estimate, exclusion counts, TOP10, and Markdown summary; research-only.
+  - `top10-dossier-data.json`, `top10-dossier.html`: current-state/30-day fill, episode, order, position, concentration, and risk briefing; never a runner input.
 - `state/account-evidence-registry/`: append-only account histories, content-addressed raw references, immutable run manifests, and deterministic rescue queue.
 - `state/perp-twr-trade-qualified/`: SIMULATION-only TOP10 state for the explicit one-or-more-30D-fill research run.
 - `state/perp-twr-activity-census/`: atomic resume checkpoint for the all-preserved-account activity census.

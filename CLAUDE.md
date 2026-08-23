@@ -11,10 +11,12 @@ This project inherits the global Claude workflow from `C:/Users/peter/.claude/CL
 - Task units:
   - Daily whale screening: `docs/workflows/daily-whale-screen.md`.
   - Portfolio-only perpMonth TWR research: `docs/workflows/simple-perp-month-twr.md`.
+  - Portfolio-only TOP10 dossier: `docs/workflows/top10-dossier.md`.
   - Account preservation and rescue: `docs/workflows/account-preservation-rescue.md`.
   - Wallet trading dashboard: `docs/workflows/wallet-trading-dashboard.md`.
 - Screening rule: rank only by ledger-verified `perp_cashflow_neutral_twr_30d`, freeze VERIFIED TOP2000, then require at least 10 completed raw-fill position episodes for ACTIVE TOP10. Leaderboard ROI/PnL/turnover are discovery signals; MDD is diagnostic only.
 - Portfolio-only research rule: `src/run_simple_perp_month_twr.py` is an isolated, non-canonical estimate using exact-timestamp raw `perpMonth` samples. Its outputs under `reports/perp-month-simple-twr/` and `state/perp-month-simple-twr/` must never be labeled VERIFIED, cash-flow-neutral, or used by the live/copy runner without a separate explicit promotion decision.
+- TOP10 dossier rule: public API enrichment and HTML briefing under `reports/perp-month-simple-twr/` are read-only research products; they do not alter canonical rankings, runner cohorts, or execution state.
 - Fixed-window sample rule: use only real aligned `perpMonth` observations inside the run-wide fixed 30-day window; do not interpolate or relabel a nearby out-of-window observation as an exact boundary, and exclude wallets with fewer than two in-window observations.
 - Carry-in rule: paper/backtest startup positions use the source average entry price; never substitute the current mark, and skip positions whose entry cannot be verified.
 - Dashboard workflow scope: 30-day replay plus real-time paper/live copy monitoring; live signing remains server-only and risk-gated.
