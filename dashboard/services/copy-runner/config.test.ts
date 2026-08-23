@@ -131,6 +131,15 @@ test("runner config never permits the trade-qualified research gate in live mode
   }), /supported only in SIMULATION mode/);
 });
 
+test("runner config never permits the simple TWR research gate in live mode", () => {
+  assert.throws(() => loadCopyRunnerConfig({
+    ...baseEnvironment(),
+    COPY_RUNNER_ENTRY_POLICY: "NEW_POSITIONS_ONLY",
+    COPY_RUNNER_MODE: "HYPERLIQUID",
+    COPY_RUNNER_ALLOW_SIMPLE_TWR_RESEARCH: "true",
+  }), /supported only in SIMULATION mode/);
+});
+
 test("runner config rejects simultaneous research cohort gates", () => {
   assert.throws(() => loadCopyRunnerConfig({
     ...baseEnvironment(),

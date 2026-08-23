@@ -269,6 +269,25 @@ test("new-position-only paper mode ignores startup exposure but copies later add
     time: now + 2,
     orderUpdate: {
       order: {
+        coin: "BTC", side: "B", limitPx: "70", sz: "1", origSz: "1", oid: 98,
+        timestamp: now + 2, reduceOnly: false, orderType: "Limit", tif: "Gtc",
+      },
+      status: "open",
+      statusTimestamp: now + 2,
+      isSnapshot: true,
+      metadataComplete: true,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(engine.snapshot().mirroredOrders.length, 1);
+  assert.equal(engine.snapshot().mirroredOrders[0]?.startupSnapshot, true);
+
+  monitor.emit({
+    type: "order",
+    whale,
+    time: now + 2,
+    orderUpdate: {
+      order: {
         coin: "BTC", side: "B", limitPx: "100", sz: "2", origSz: "2", oid: 100,
         timestamp: now + 2, reduceOnly: false, orderType: "Limit", tif: "Gtc",
       },
@@ -279,7 +298,7 @@ test("new-position-only paper mode ignores startup exposure but copies later add
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(engine.snapshot().mirroredOrders.length, 1);
+  assert.equal(engine.snapshot().mirroredOrders.length, 2);
 
   monitor.emit({ type: "fill", whale, time: now + 3, fill: { coin: "BTC", side: "B", px: "100", sz: "2", time: now + 3, startPosition: "5" } });
   monitor.emit({ type: "fill", whale, time: now + 4, fill: { coin: "BTC", side: "A", px: "100", sz: "1", time: now + 4, startPosition: "7" } });

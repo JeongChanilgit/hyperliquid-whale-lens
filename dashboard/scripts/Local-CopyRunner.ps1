@@ -15,6 +15,7 @@ param(
   [string]$AllowedSymbols = '*',
   [switch]$AllowPartialResearch,
   [switch]$AllowTradeQualifiedResearch,
+  [switch]$AllowSimpleTwrResearch,
   [int]$RunnerPort = 8788,
   [int]$SitePort = 3000
 )
@@ -22,17 +23,23 @@ param(
 $ErrorActionPreference = 'Stop'
 $dashboardRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $projectRoot = (Resolve-Path (Join-Path $dashboardRoot '..')).Path
-$canonicalStatePath = if ($AllowTradeQualifiedResearch) {
+$canonicalStatePath = if ($AllowSimpleTwrResearch) {
+  Join-Path $projectRoot 'state\perp-month-simple-twr\latest_active_top10.json'
+} elseif ($AllowTradeQualifiedResearch) {
   Join-Path $projectRoot 'state\perp-twr-trade-qualified\latest_active_top10.json'
 } elseif ($AllowPartialResearch) {
   Join-Path $projectRoot 'state\perp-twr-research\latest_active_top10.json'
 } else { Join-Path $projectRoot 'state\perp-twr-top10\latest_active_top10.json' }
-$canonicalReportPath = if ($AllowTradeQualifiedResearch) {
+$canonicalReportPath = if ($AllowSimpleTwrResearch) {
+  Join-Path $projectRoot 'reports\perp-month-simple-twr\latest.json'
+} elseif ($AllowTradeQualifiedResearch) {
   Join-Path $projectRoot 'reports\perp-twr-trade-qualified\latest.json'
 } elseif ($AllowPartialResearch) {
   Join-Path $projectRoot 'reports\perp-twr-research\latest.json'
 } else { Join-Path $projectRoot 'reports\perp-twr-discovery\latest.json' }
-$canonicalCandidatesPath = if ($AllowTradeQualifiedResearch) {
+$canonicalCandidatesPath = if ($AllowSimpleTwrResearch) {
+  Join-Path $projectRoot 'reports\perp-month-simple-twr\latest.json'
+} elseif ($AllowTradeQualifiedResearch) {
   Join-Path $projectRoot 'reports\perp-twr-rescue\latest-summary.json'
 } elseif ($AllowPartialResearch) {
   Join-Path $projectRoot 'reports\perp-twr-research\latest-candidates.json'
@@ -44,8 +51,8 @@ $localSimulationToken = 'whale-lens-local-simulation-only-v1'
 
 function Assert-CanonicalPaperStart {
   if ($Action -ne 'Start') { return }
-  if ($AllowPartialResearch -and $AllowTradeQualifiedResearch) {
-    throw 'Choose either partial research or trade-qualified research, not both.'
+  if (@($AllowPartialResearch, $AllowTradeQualifiedResearch, $AllowSimpleTwrResearch).Where({ $_ }).Count -gt 1) {
+    throw 'Choose only one research cohort authorization.'
   }
   if ($WhaleAddress.Count -ne 0) {
     throw 'Local paper start always uses the hash-linked selected TOP 10; WhaleAddress overrides are not allowed.'
@@ -205,7 +212,7 @@ function Start-LocalStack {
   $sessionEndsAtMs = $sessionStartedAtMs + ([int64]$SessionDays * 86400000)
   $sessionStamp = [DateTimeOffset]::FromUnixTimeMilliseconds($sessionStartedAtMs).UtcDateTime.ToString('yyyyMMddTHHmmssfffZ')
   $sessionNonce = [guid]::NewGuid().ToString('N')
-  $selectionSuffix = if ($AllowTradeQualifiedResearch) { 'trade-qualified-top10' } elseif ($AllowPartialResearch) { 'research-top10' } else { 'canonical-top10' }
+  $selectionSuffix = if ($AllowSimpleTwrResearch) { 'simple-twr-top10' } elseif ($AllowTradeQualifiedResearch) { 'trade-qualified-top10' } elseif ($AllowPartialResearch) { 'research-top10' } else { 'canonical-top10' }
   $sessionDatabase = Join-Path $dashboardRoot "data\sessions\paper-$sessionStamp-$sessionNonce-$selectionSuffix-${SessionDays}d.sqlite"
   if (Test-Path -LiteralPath $sessionDatabase) {
     throw "Refusing to reuse an existing paper-session database: $sessionDatabase"
@@ -224,7 +231,8 @@ function Start-LocalStack {
     # during the experiment would censor a whale precisely after a drawdown.
     # This exception is simulation-only and available only to the hash-linked
     # trade-qualified research cohort.
-    COPY_RUNNER_MIN_SOURCE_ACCOUNT_VALUE_USD = $(if ($AllowTradeQualifiedResearch) { '0' } else { '10000' })
+    COPY_RUNNER_MIN_SOURCE_ACCOUNT_VALUE_USD = $(if ($AllowTradeQualifiedResearch -or $AllowSimpleTwrResearch) { '0' } else { '10000' })
+    COPY_RUNNER_CANONICAL_MAX_AGE_MS = $(if ($AllowSimpleTwrResearch) { [string](7 * 86400000) } else { [string](48 * 60 * 60 * 1000) })
     COPY_RUNNER_SESSION_STARTED_AT_MS = [string]$sessionStartedAtMs
     COPY_RUNNER_SESSION_ENDS_AT_MS = [string]$sessionEndsAtMs
     COPY_RUNNER_DATABASE = $sessionDatabase
@@ -235,6 +243,8 @@ function Start-LocalStack {
     COPY_RUNNER_ACTIVITY_CENSUS = $activityCensusPath
     COPY_RUNNER_ALLOW_PARTIAL_RESEARCH = $(if ($AllowPartialResearch) { 'true' } else { 'false' })
     COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH = $(if ($AllowTradeQualifiedResearch) { 'true' } else { 'false' })
+    COPY_RUNNER_ALLOW_SIMPLE_TWR_RESEARCH = $(if ($AllowSimpleTwrResearch) { 'true' } else { 'false' })
+    COPY_RUNNER_REQUIRE_SEED_MATCH = $(if ($AllowSimpleTwrResearch) { 'false' } else { 'true' })
     HYPERLIQUID_ENABLED = 'false'
     HYPERLIQUID_TESTNET = 'true'
     HYPERLIQUID_AGENT_PRIVATE_KEY = ''

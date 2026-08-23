@@ -21,6 +21,7 @@
     "data:sync-research": "cross-env WHALE_LENS_RESEARCH_OVERRIDE=true tsx scripts/sync-canonical-seeds.ts",
     "data:sync-rescue": "tsx scripts/sync-rescue-dashboard.ts",
     "data:sync-trade-qualified": "tsx scripts/sync-trade-qualified-seeds.ts",
+    "data:sync-simple-twr-runner": "tsx scripts/sync-simple-twr-runner.ts",
     "data:compact": "tsx scripts/compact-preloaded-wallets.ts",
     "backtest:equity": "tsx scripts/backtest-equity-sizing.ts",
     "db:generate": "drizzle-kit generate"

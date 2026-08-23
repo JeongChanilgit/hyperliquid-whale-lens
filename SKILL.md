@@ -46,6 +46,8 @@ python src\hyperliquid_whale_screener.py --resume
 
 partial run, VERIFIED 2,000명 미달, boundary breach, outside shard 평가 누락, finalist 10명 미달, report/hash 불일치는 기존 canonical TOP10을 덮어쓰지 못한다. copy runner는 보고서·candidate hash까지 교차 검증된 canonical TOP10만 사용해야 한다.
 
+사용자가 현재 턴에 명시적으로 허용한 경우에만, 완전한 고정-window `perp-month-simple-twr` TOP10을 별도 SIMULATION 연구 세션에 사용할 수 있다. 전체 보고서에서 TOP10을 독립 재산출하고 compact state와 보고서 파일 hash를 교차검증하며, `NEW_POSITIONS_ONLY`로 기존 포지션·과거 체결은 제외하고 현재 진입 가능한 미체결 주문만 시작 스냅샷에 복제한다. 이 예외는 canonical 또는 live 입력이 아니다.
+
 ## 운영 경계
 
 - Hyperliquid endpoint weight를 합산한 global 1,200 weight/min limiter와 stage별 budget을 유지한다.

@@ -1,0 +1,95 @@
+{
+  "schema_version": "1",
+  "selection_type": "SIMPLE_PERP_MONTH_TWR_RESEARCH",
+  "simulation_only": true,
+  "research_only": true,
+  "source_run_id": "perp-month-simple-twr-20260821-v4-full6272",
+  "source_as_of_ms": 1787264467497,
+  "source_window_start_ms": 1784672467497,
+  "source_window_end_ms": 1787264467497,
+  "source_metric_name": "perp_month_simple_twr_30d",
+  "source_data_quality": "PORTFOLIO_ONLY_ESTIMATE",
+  "source_cashflow_neutral_verified": false,
+  "source_report_internal_sha256": "e1193c40421c2897d00613534add17563a3bc211a7faaf3a31a1b8034fd73eea",
+  "source_report_file_sha256": "14211455877eb758f6933ea00eaaa6c273894e636f16aaf849a5d115c14c6b1e",
+  "source_ranking_input_sha256": "dd5d95e0b8b5e180fabb29b42d5597aa31cbbad89a4f53fe1c5405867520e4f1",
+  "source_preserved_account_count": 6272,
+  "source_coverage_complete": true,
+  "startup_position_policy": "NEW_POSITIONS_ONLY",
+  "startup_fill_policy": "IGNORE_SNAPSHOT_FILLS",
+  "startup_order_policy": "COPY_ENTRY_CAPABLE_OPEN_ORDERS",
+  "wallet_order_hash": "8aa9fbacb5a4a946b8359df8cc9a011d3d89b34755ec48783312455e821af1c7",
+  "wallets": [
+    {
+      "address": "0x40f20b734d7d25ba0b6219e921382fa992a56a9e",
+      "rank": 1,
+      "status": "ACTIVE",
+      "label": "Simple TWR 01",
+      "perp_month_simple_twr_30d": "329.7278548217102404860281329"
+    },
+    {
+      "address": "0x9f5777bb808871052c2c5fc13d37d05e67fbc70e",
+      "rank": 2,
+      "status": "ACTIVE",
+      "label": "Simple TWR 02",
+      "perp_month_simple_twr_30d": "11.49286830948248787326882501"
+    },
+    {
+      "address": "0x7647fc553bc8a03df9affbdc656ae159d894a40c",
+      "rank": 3,
+      "status": "ACTIVE",
+      "label": "Simple TWR 03",
+      "perp_month_simple_twr_30d": "10.38347681741561874832192723"
+    },
+    {
+      "address": "0x744a26a3e5a56efb7d95119752a63183c236bbd0",
+      "rank": 4,
+      "status": "ACTIVE",
+      "label": "Simple TWR 04",
+      "perp_month_simple_twr_30d": "9.15139901206271069745895353"
+    },
+    {
+      "address": "0xc16c69d13583ced94245f79afb8751a1883bf2c6",
+      "rank": 5,
+      "status": "ACTIVE",
+      "label": "Simple TWR 05",
+      "perp_month_simple_twr_30d": "7.720481941467345287028873825"
+    },
+    {
+      "address": "0x1b232b41b0e75550c59288b99874e4a8142fbe21",
+      "rank": 6,
+      "status": "ACTIVE",
+      "label": "Simple TWR 06",
+      "perp_month_simple_twr_30d": "6.401102371784216731398292397"
+    },
+    {
+      "address": "0xbb1ac608e3bf90b73fa782007878205644c890a7",
+      "rank": 7,
+      "status": "ACTIVE",
+      "label": "Simple TWR 07",
+      "perp_month_simple_twr_30d": "5.903735262865002492700138439"
+    },
+    {
+      "address": "0xb7e0b9fbc9479330d70bcc82a7d4325a20e8d1aa",
+      "rank": 8,
+      "status": "ACTIVE",
+      "label": "Simple TWR 08",
+      "perp_month_simple_twr_30d": "5.501957504511514424230523073"
+    },
+    {
+      "address": "0xbad27601efdf6e5e0d025c72f7e9ce98fc2a7968",
+      "rank": 9,
+      "status": "ACTIVE",
+      "label": "Simple TWR 09",
+      "perp_month_simple_twr_30d": "4.989719803260891361471104815"
+    },
+    {
+      "address": "0x8923cdff38a43d1fd59d323c35b900047e431bac",
+      "rank": 10,
+      "status": "ACTIVE",
+      "label": "Simple TWR 10",
+      "perp_month_simple_twr_30d": "4.382579826254007303646234115"
+    }
+  ],
+  "cohort_sha256": "7511fa894ed6739ce97f9e0ce166d31222d67d20e51664114dd76071c093e554"
+}

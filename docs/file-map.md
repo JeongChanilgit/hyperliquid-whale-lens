@@ -12,6 +12,7 @@
   - `dashboard/app/api/copy-engine/`: localhost-only bridge to the durable standalone runner; not itself a 24/7 worker.
   - `dashboard/app/api/audit/`, `dashboard/db/`, `dashboard/drizzle/`: single-user local audit, wallet, order, run, log, and performance persistence.
   - `dashboard/services/copy-runner/`: standalone long-lived Hyperliquid collector with SQLite audit, strict canonical and simulation-only research cohort hash loaders, and `hyperliquid_bridge.py`, a persistent official-SDK signer/executor used only by an explicitly enabled live runner.
+    - `simple-twr-whales.ts`: explicit simulation-only loader that cross-checks the complete portfolio-only report, its compact runner state, ordered TOP10, and report-file hash.
   - `dashboard/scripts/`: preload/compaction tasks and Windows local stack start/status/stop commands; a new runner starts only from complete canonical screener output.
   - `dashboard/public/preloaded/`: generated 30-day wallet snapshots for all screened TOP 50 addresses; refresh through `npm run data:prefetch` rather than hand editing.
   - `dashboard/.openai/hosting.json`: Sites deployment configuration.
@@ -29,7 +30,7 @@
   - `evidence_registry.py`, `interval_twr.py`, `reconciliation.py`, `valuation.py`, `rescue.py`: append-only account evidence, interval timing rescue, bounded block reconciliation, provenance-preserving cash-flow valuation, exact/watchlist separation, audits, and rescue queue construction.
 - `src/run_account_preservation_rescue.py`: regenerate full/compact rescue reports and the hash-linked, simulation-only exact-TWR TOP10 with at least one raw 30D fill.
 - `src/run_simple_perp_month_twr.py`: cache-only, exact-timestamp `perpMonth` TWR research runner; writes isolated non-canonical outputs and never changes copy-runner state.
-- `src/whale_lens/simple_perp_month.py`: strict V4 raw-cache resolver, simplified `delta PnL / previous equity` compounding, anomaly gates, flow diagnostics, deterministic TOP10, and atomic research artifact writers.
+- `src/whale_lens/simple_perp_month.py`: strict V4 raw-cache resolver, simplified `delta PnL / previous equity` compounding, anomaly gates, flow diagnostics, deterministic TOP10, and atomic research artifact writers. Its TOP10 may become a runner input only through the explicit simulation-only exception below.
 - `src/collect_simple_twr_top10_dossier.py`: bounded official-public-API evidence collector for the isolated portfolio-only TOP10.
 - `src/whale_lens/dossier_analysis.py`: fact/inference-separated position, order, fill, episode, cash-flow, drawdown, and copyability analysis.
 - `src/render_simple_twr_top10_dossier.py`: standalone offline HTML briefing renderer.
@@ -69,6 +70,7 @@ Build and test entrypoints:
 - Trade-qualified local paper run: use `powershell -File scripts/Local-CopyRunner.ps1 -Action Start -AllowTradeQualifiedResearch` from `dashboard/`; live execution is rejected for this cohort.
 - Dashboard preload: after canonical sync, run `npm run data:prefetch` from `dashboard/`.
 - Copy runner: run `npm run copy-runner` from `dashboard/`; its server-only environment and persistent database are documented in `dashboard/services/copy-runner/README.md`.
+- Explicit simple-TWR paper cohort: run `npm run data:sync-simple-twr-runner`, then start `scripts/Local-CopyRunner.ps1 -Action Start -AllowSimpleTwrResearch`; this never enables live execution.
 
 Generated/do-not-touch zones:
 

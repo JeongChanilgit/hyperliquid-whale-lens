@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { CopyEngineConfig, CopyEntryPolicy, CopyMode, WhaleConfig } from "../../app/lib/copy-types";
 import { SEED_WALLETS } from "../../app/seed-wallets";
 import { loadCanonicalTop10 } from "./canonical-whales";
+import { loadSimpleTwrTop10 } from "./simple-twr-whales";
 import { loadTradeQualifiedTop10 } from "./trade-qualified-whales";
 
 export interface CopyRunnerConfig {
@@ -20,7 +21,7 @@ export interface CopyRunnerConfig {
     rankingScope: string;
     configHash: string;
     candidatePoolHash: string;
-    selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH" | "TRADE_QUALIFIED_TWR_RESEARCH";
+    selectionMode: "CANONICAL" | "VERIFIED_PARTIAL_RESEARCH" | "TRADE_QUALIFIED_TWR_RESEARCH" | "SIMPLE_PERP_MONTH_TWR_RESEARCH";
     researchOverride: boolean;
   };
   session?: {
@@ -61,6 +62,8 @@ const DEFAULT_TRADE_STATE = resolve(PROJECT_ROOT, "state/perp-twr-trade-qualifie
 const DEFAULT_TRADE_REPORT = resolve(PROJECT_ROOT, "reports/perp-twr-trade-qualified/latest.json");
 const DEFAULT_RESCUE_SUMMARY = resolve(PROJECT_ROOT, "reports/perp-twr-rescue/latest-summary.json");
 const DEFAULT_ACTIVITY_CENSUS = resolve(PROJECT_ROOT, "reports/perp-twr-activity-census/latest.json");
+const DEFAULT_SIMPLE_TWR_STATE = resolve(PROJECT_ROOT, "state/perp-month-simple-twr/latest_active_top10.json");
+const DEFAULT_SIMPLE_TWR_REPORT = resolve(PROJECT_ROOT, "reports/perp-month-simple-twr/latest.json");
 
 const parseWhales = (raw: string): WhaleConfig[] => {
   let decoded: unknown;
@@ -95,7 +98,8 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
   }
   const allowPartialResearch = env.COPY_RUNNER_ALLOW_PARTIAL_RESEARCH === "true";
   const allowTradeQualifiedResearch = env.COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH === "true";
-  if (allowPartialResearch && allowTradeQualifiedResearch) {
+  const allowSimpleTwrResearch = env.COPY_RUNNER_ALLOW_SIMPLE_TWR_RESEARCH === "true";
+  if ([allowPartialResearch, allowTradeQualifiedResearch, allowSimpleTwrResearch].filter(Boolean).length > 1) {
     throw new Error("Choose only one research cohort authorization");
   }
   if (allowPartialResearch && mode !== "SIMULATION") {
@@ -104,8 +108,17 @@ export const loadCopyRunnerConfig = (env: NodeJS.ProcessEnv = process.env): Copy
   if (allowTradeQualifiedResearch && mode !== "SIMULATION") {
     throw new Error("COPY_RUNNER_ALLOW_TRADE_QUALIFIED_RESEARCH is supported only in SIMULATION mode");
   }
+  if (allowSimpleTwrResearch && mode !== "SIMULATION") {
+    throw new Error("COPY_RUNNER_ALLOW_SIMPLE_TWR_RESEARCH is supported only in SIMULATION mode");
+  }
   const maxCanonicalAgeMs = number(env, "COPY_RUNNER_CANONICAL_MAX_AGE_MS", 48 * 60 * 60 * 1_000, 60_000);
-  const canonical = allowTradeQualifiedResearch
+  const canonical = allowSimpleTwrResearch
+    ? loadSimpleTwrTop10({
+      statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_SIMPLE_TWR_STATE),
+      reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_SIMPLE_TWR_REPORT),
+      maxAgeMs: maxCanonicalAgeMs,
+    })
+    : allowTradeQualifiedResearch
     ? loadTradeQualifiedTop10({
       statePath: resolve(env.COPY_RUNNER_CANONICAL_STATE?.trim() || DEFAULT_TRADE_STATE),
       reportPath: resolve(env.COPY_RUNNER_CANONICAL_REPORT?.trim() || DEFAULT_TRADE_REPORT),

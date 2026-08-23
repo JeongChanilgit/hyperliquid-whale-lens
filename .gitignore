@@ -85,6 +85,7 @@ logs/
 !/state/perp-month-simple-twr/
 !/state/perp-month-simple-twr/latest.json
 !/state/perp-month-simple-twr/latest.md
+!/state/perp-month-simple-twr/latest_active_top10.json
 
 # Local packaging/caches
 work/
