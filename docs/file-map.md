@@ -13,6 +13,7 @@
   - `dashboard/app/api/audit/`, `dashboard/db/`, `dashboard/drizzle/`: single-user local audit, wallet, order, run, log, and performance persistence.
   - `dashboard/services/copy-runner/`: standalone long-lived Hyperliquid collector with SQLite audit, strict canonical and simulation-only research cohort hash loaders, and `hyperliquid_bridge.py`, a persistent official-SDK signer/executor used only by an explicitly enabled live runner.
     - `simple-twr-whales.ts`: explicit simulation-only loader that cross-checks the complete portfolio-only report, its compact runner state, ordered TOP10, and report-file hash.
+  - `dashboard/services/faithful-mirror-v2/`: isolated 1–5 source/target-pair faithful state-mirror service. PAPER and LIVE share the same pair actor; PAPER bootstraps current positions at current L2 prices, while LIVE remains explicitly armed and server-signed. Its audit/checkpoint files, control port, and target accounts are separate from the legacy copy runner and its SQLite databases.
   - `dashboard/scripts/`: preload/compaction tasks and Windows local stack start/status/stop commands; a new runner starts only from complete canonical screener output.
   - `dashboard/public/preloaded/`: generated 30-day wallet snapshots for all screened TOP 50 addresses; refresh through `npm run data:prefetch` rather than hand editing.
   - `dashboard/.openai/hosting.json`: Sites deployment configuration.
@@ -70,6 +71,7 @@ Build and test entrypoints:
 - Trade-qualified local paper run: use `powershell -File scripts/Local-CopyRunner.ps1 -Action Start -AllowTradeQualifiedResearch` from `dashboard/`; live execution is rejected for this cohort.
 - Dashboard preload: after canonical sync, run `npm run data:prefetch` from `dashboard/`.
 - Copy runner: run `npm run copy-runner` from `dashboard/`; its server-only environment and persistent database are documented in `dashboard/services/copy-runner/README.md`.
+- Faithful Mirror V2: run and test from `dashboard/services/faithful-mirror-v2/` using its README. The service listens on its own localhost control port, never reuses legacy runner persistence, and LIVE must not auto-start.
 - Explicit simple-TWR paper cohort: run `npm run data:sync-simple-twr-runner`, then start `scripts/Local-CopyRunner.ps1 -Action Start -AllowSimpleTwrResearch`; this never enables live execution.
 
 Generated/do-not-touch zones:

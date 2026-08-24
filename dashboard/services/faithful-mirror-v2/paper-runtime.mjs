@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { FiveWhaleFaithfulMirrorEngine } from "./engine.mjs";
-import { normalizeAddress, normalizeCoin } from "./domain.mjs";
+import { canonicalTargetCloid, normalizeAddress, normalizeCoin } from "./domain.mjs";
 import { PaperExecutionPort } from "./paper-venue.mjs";
 import {
   HyperliquidInfoClient,
@@ -10,6 +10,8 @@ import {
   parseUserFill,
   parseUserFunding,
   fillId,
+  BoundedFillDeduper,
+  ActiveLeverageCache,
 } from "./runtime.mjs";
 
 const MAINNET_WS = "wss://api.hyperliquid.xyz/ws";
@@ -207,9 +209,14 @@ export class PaperSourceRuntime {
     this.reconnectMaxMs = reconnectMaxMs;
     this.allowApproxUnified = allowApproxUnified;
     this.context = new Map();
-    this.seenFillIds = new Set();
+    this.seenFillIds = new BoundedFillDeduper();
     this.eventSequence = 0;
     this.sockets = [];
+    this.bookRequests = new Map();
+    this.readyBooks = new Set();
+    this.currentMarks = new Map();
+    this.restBootstrapQueue = Promise.resolve();
+    this.recoveryByPair = new Map();
     this.market = new PublicMarketSocket({
       testnet,
       WebSocketImpl,
@@ -227,7 +234,22 @@ export class PaperSourceRuntime {
       const mode = await this.info.accountMode(pair.sourceAddress);
       if (mode === "PORTFOLIO_MARGIN") throw new Error(`Portfolio margin paper source is unsupported: ${pair.sourceAddress}`);
       if (mode === "UNIFIED" && !this.allowApproxUnified) throw new Error(`Unified paper source requires explicit allowApproxUnified: ${pair.sourceAddress}`);
-      const context = { ...pair, mode, snapshot: null, orders: null, bootstrapped: false, buffer: [], lastFillTime: null, firstFundingSnapshotSeen: false };
+      const context = {
+        ...pair,
+        mode,
+        snapshot: null,
+        orders: null,
+        bootstrapped: false,
+        bootstrapPromise: null,
+        buffer: [],
+        lastFillTime: null,
+        targetLastFillTime: null,
+        firstFundingSnapshotSeen: false,
+        firstFillSnapshotSeen: false,
+        leverage: new ActiveLeverageCache(),
+        recoveredOrderOwnership: new Map(),
+      };
+      this.#applyRecovery(context, this.recoveryByPair.get(context.pairId));
       this.context.set(pair.sourceAddress, context);
       const socket = new UserSocket({
         address: pair.sourceAddress,
@@ -258,38 +280,116 @@ export class PaperSourceRuntime {
     this.engine.stop();
   }
 
-  async #onOpen(context) {
-    context.orders = (await this.info.openOrders(context.sourceAddress)).map((order) => ({
-      ...order,
-      poolId: context.mode === "UNIFIED" ? "unified" : order.poolId,
-    }));
-    for (const order of context.orders) await this.#ensureBook(order.coin);
-    if (context.lastFillTime != null) {
-      const fills = await this.info.fillsSince(context.sourceAddress, Math.max(0, context.lastFillTime - 1_000));
-      for (const fill of fills) await this.#handleFill(context, fill, true);
-      if (context.bootstrapped) await this.engine.syncSourceOrders(context.sourceAddress, context.orders);
+  restoreRecoveryCheckpoint(checkpoint) {
+    const candidates = Array.isArray(checkpoint?.pairs)
+      ? checkpoint.pairs
+      : Object.values(checkpoint?.pairs ?? checkpoint?.contexts ?? {});
+    for (const value of candidates) {
+      this.#validateRecoveryCheckpoint(value);
+      this.recoveryByPair.set(String(value.pairId), structuredClone(value));
     }
-    await this.#tryBootstrap(context);
+    for (const context of this.context.values()) this.#applyRecovery(context, this.recoveryByPair.get(context.pairId));
+    return { accepted: true, restoredPairs: this.recoveryByPair.size };
+  }
+
+  #validateRecoveryCheckpoint(checkpoint) {
+    const value = record(checkpoint);
+    if (!value?.pairId) throw new Error("Recovery checkpoint pairId is required");
+    const pair = this.pairs.find((candidate) => candidate.pairId === String(value.pairId));
+    if (!pair) throw new Error(`Recovery checkpoint references unknown pair ${value.pairId}`);
+    if (value.sourceAddress && normalizeAddress(value.sourceAddress) !== pair.sourceAddress) throw new Error(`Recovery source mismatch for ${pair.pairId}`);
+    if (value.targetAddress && normalizeAddress(value.targetAddress) !== pair.targetAddress) throw new Error(`Recovery target mismatch for ${pair.pairId}`);
+    this.#parseRecoveredOrderOwnership(pair.pairId, value.sourceOrderToTargetCloid);
+  }
+
+  #parseRecoveredOrderOwnership(pairId, rawMappings) {
+    if (rawMappings == null) return new Map();
+    const mappings = record(rawMappings);
+    if (!mappings) throw new Error(`Recovery order mapping must be an object for ${pairId}`);
+    const ownership = new Map();
+    for (const [rawSourceOrderId, rawTargetCloid] of Object.entries(mappings)) {
+      const sourceOrderId = String(rawSourceOrderId);
+      const targetCloid = String(rawTargetCloid);
+      if (!sourceOrderId || !targetCloid || sourceOrderId.trim() !== sourceOrderId || targetCloid !== canonicalTargetCloid(pairId, sourceOrderId)) {
+        throw new Error(`Recovery target Cloid is non-canonical for ${pairId}/${sourceOrderId || "<missing>"}`);
+      }
+      ownership.set(sourceOrderId, targetCloid);
+    }
+    return ownership;
+  }
+
+  recoveryCheckpoint() {
+    const enginePairs = this.engine?.snapshot?.()?.pairs ?? {};
+    return {
+      schemaVersion: 1,
+      generatedAt: Date.now(),
+      pairs: [...this.context.values()].map((context) => this.#recoveryPair(context, enginePairs[context.pairId])),
+    };
+  }
+
+  async reconcile() {
+    for (const context of this.context.values()) {
+      if (this.#isTerminalContext(context)) continue;
+      const state = await this.info.allDexsState(context.sourceAddress);
+      await this.#acceptSnapshot(context, state);
+      context.orders = await this.#decorateOrders(context, await this.info.openOrders(context.sourceAddress, { allDexsState: state }));
+      for (const order of context.orders) await this.#ensureBook(order.coin);
+      if (context.bootstrapped) await this.engine.syncSourceOrders(context.sourceAddress, context.orders);
+      await this.#tryBootstrap(context);
+    }
+    await this.engine.whenIdle();
+    return { accepted: true, pairCount: this.context.size };
+  }
+
+  #isTerminalContext(context) {
+    if (!context) return true;
+    if (typeof this.engine.isPairTerminal === "function") return this.engine.isPairTerminal(context.pairId);
+    const actor = this.engine?.snapshot?.()?.pairs?.[context.pairId];
+    return actor?.killed === true || actor?.blocked === true || actor?.stopped === true;
+  }
+
+  async #onOpen(context) {
+    if (this.#isTerminalContext(context)) return { ignored: true, reason: "PAIR_TERMINAL" };
+    // REST bootstrap is serialized across the five whales. Each wallet fans
+    // out across every perp DEX, so allowing all five sockets to bootstrap at
+    // once can exhaust the shared public info quota and leave a partial state.
+    const task = this.restBootstrapQueue.catch(() => {}).then(async () => {
+      if (this.#isTerminalContext(context)) return;
+      const allDexsState = await this.info.allDexsState(context.sourceAddress);
+      await this.#acceptSnapshot(context, allDexsState);
+      context.orders = await this.#decorateOrders(context, await this.info.openOrders(context.sourceAddress, { allDexsState }));
+      for (const order of context.orders) await this.#ensureBook(order.coin);
+      if (context.lastFillTime != null) {
+        const fills = await this.info.fillsSince(context.sourceAddress, Math.max(0, context.lastFillTime - 1_000));
+        for (const fill of fills) await this.#handleFill(context, fill, true);
+        if (context.bootstrapped) await this.engine.syncSourceOrders(context.sourceAddress, context.orders);
+      }
+      await this.#tryBootstrap(context);
+    });
+    this.restBootstrapQueue = task.catch(() => {});
+    return task;
   }
 
   async #onMessage(context, message, error) {
+    // A terminal pair keeps its socket alive so active pairs need no global
+    // reconnect, but its late/queued source events are deliberate no-ops.
+    if (this.#isTerminalContext(context)) return;
     if (error) {
       this.log({ type: "PAPER_SOURCE_WS_ERROR", sourceAddress: context.sourceAddress, message: error instanceof Error ? error.message : String(error), at: Date.now() });
       return;
     }
     if (message?.channel === "allDexsClearinghouseState") {
-      const portfolioEquityUsd = context.mode === "UNIFIED" ? await this.info.portfolioEquity(context.sourceAddress) : null;
-      const snapshot = parseAllDexsAccountSnapshot({ payload: message.data, accountMode: context.mode, portfolioEquityUsd });
-      context.snapshot = snapshot;
-      for (const position of snapshot.positions) await this.#ensureBook(position.coin);
-      if (context.bootstrapped) this.engine.onSourceSnapshot(context.sourceAddress, snapshot);
+      await this.#acceptSnapshot(context, message.data);
       await this.#tryBootstrap(context);
       return;
     }
     if (message?.channel === "userFills") {
       const data = record(message.data);
       const isSnapshot = data?.isSnapshot === true;
-      if (isSnapshot && context.lastFillTime == null) return;
+      if (isSnapshot && !context.firstFillSnapshotSeen) {
+        context.firstFillSnapshotSeen = true;
+        return;
+      }
       for (const raw of Array.isArray(data?.fills) ? data.fills : []) {
         const fill = parseUserFill(raw);
         if (fill) await this.#handleFill(context, fill, false);
@@ -315,7 +415,7 @@ export class PaperSourceRuntime {
       for (const raw of values) {
         const update = parseOrderUpdate(raw);
         if (!update) continue;
-        update.order.leverage = await this.info.activeLeverage(context.sourceAddress, update.order.coin);
+        update.order.leverage = await context.leverage.resolve(update.order.coin, () => this.info.activeLeverage(context.sourceAddress, update.order.coin));
         update.order.poolId = context.mode === "UNIFIED" ? "unified" : update.order.coin.includes(":") ? update.order.coin.split(":", 1)[0] : "main";
         await this.#ensureBook(update.order.coin);
         if (context.bootstrapped) await this.engine.onSourceOrder(context.sourceAddress, update);
@@ -325,13 +425,13 @@ export class PaperSourceRuntime {
   }
 
   async #handleFill(context, fill, backfill) {
+    if (this.#isTerminalContext(context)) return { ignored: true, reason: "PAIR_TERMINAL" };
     const key = fillId(context.sourceAddress, fill);
-    if (this.seenFillIds.has(key)) return;
-    this.seenFillIds.add(key);
-    if (this.seenFillIds.size > 100_000) this.seenFillIds.clear();
+    if (this.seenFillIds.has(key, fill.time)) return;
+    this.seenFillIds.add(key, fill.time);
     context.lastFillTime = Math.max(context.lastFillTime ?? 0, fill.time);
     const existing = context.snapshot?.positions?.find((position) => position.coin === fill.coin);
-    fill.leverage = existing?.leverage ?? await this.info.activeLeverage(context.sourceAddress, fill.coin);
+    fill.leverage = existing?.leverage ?? await context.leverage.resolve(fill.coin, () => this.info.activeLeverage(context.sourceAddress, fill.coin));
     fill.marginUsedUsd = existing?.marginUsedUsd;
     fill.poolId = existing?.poolId ?? (context.mode === "UNIFIED" ? "unified" : fill.coin.includes(":") ? fill.coin.split(":", 1)[0] : "main");
     await this.#ensureBook(fill.coin);
@@ -341,6 +441,7 @@ export class PaperSourceRuntime {
   }
 
   #applyScaledFunding(context, funding) {
+    if (this.#isTerminalContext(context)) return;
     if (!context.bootstrapped || Math.abs(funding.sourceSize) <= 1e-12) return;
     const pair = this.pairs.find((item) => item.pairId === context.pairId);
     const venue = this.venues.get(context.pairId);
@@ -357,17 +458,35 @@ export class PaperSourceRuntime {
   async #ensureBook(coin) {
     const normalized = normalizeCoin(coin);
     this.market.subscribe(normalized);
-    const book = await this.info.l2Book(normalized);
-    this.#onBook(normalized, book);
+    if (this.readyBooks.has(normalized)) return;
+    const current = this.bookRequests.get(normalized);
+    if (current) return current;
+    const request = Promise.resolve().then(() => this.info.l2Book(normalized)).then((book) => {
+      this.#onBook(normalized, book);
+      return book;
+    }).finally(() => this.bookRequests.delete(normalized));
+    this.bookRequests.set(normalized, request);
+    return request;
   }
 
   #onBook(coin, book) {
+    const normalizedCoin = normalizeCoin(coin);
+    this.readyBooks.add(normalizedCoin);
+    const bestBid = Number(book?.bids?.[0]?.price ?? book?.bids?.[0]?.px ?? book?.bids?.[0]?.[0]);
+    const bestAsk = Number(book?.asks?.[0]?.price ?? book?.asks?.[0]?.px ?? book?.asks?.[0]?.[0]);
+    const mark = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : bestBid > 0 ? bestBid : bestAsk > 0 ? bestAsk : null;
+    if (mark != null) this.currentMarks.set(normalizedCoin, mark);
     for (const [pairId, venue] of this.venues) {
+      const pair = this.pairs.find((item) => item.pairId === pairId);
+      const context = pair ? this.context.get(pair.sourceAddress) : null;
+      if (context && this.#isTerminalContext(context)) continue;
       venue.setBook(coin, book);
       if (!venue.hasPair(pairId)) continue;
-      const pair = this.pairs.find((item) => item.pairId === pairId);
       const snapshot = venue.getSnapshot(pairId);
       const hasPosition = snapshot.positions.some((position) => normalizeCoin(position.coin) === normalizeCoin(coin));
+      const sourceTracksCoin = Boolean(context?.snapshot?.positions?.some((position) => normalizeCoin(position.coin) === normalizedCoin)
+        || context?.orders?.some((order) => normalizeCoin(order.coin) === normalizedCoin));
+      if (pair && mark != null && (sourceTracksCoin || hasPosition)) this.engine.onCurrentMark(pair.sourceAddress, normalizedCoin, mark);
       if (pair && hasPosition) this.engine.onTargetSnapshot(pair.targetAddress, snapshot);
     }
   }
@@ -377,22 +496,132 @@ export class PaperSourceRuntime {
       if (!venue.hasPair(pairId)) continue;
       const pair = this.pairs.find((item) => item.pairId === pairId);
       if (!pair) continue;
+      const context = this.context.get(pair.sourceAddress);
+      if (this.#isTerminalContext(context)) continue;
       const fills = venue.applyPublicTrade({ pairId, ...trade });
-      for (const fill of fills) this.engine.onTargetFill(pair.targetAddress, fill);
+      for (const rawFill of fills) {
+        const observedAt = Date.now();
+        const signedSize = (String(rawFill.side).toUpperCase() === "B" || String(rawFill.side).toUpperCase() === "BUY") ? Number(rawFill.size) : -Number(rawFill.size);
+        const fill = {
+          ...rawFill,
+          time: Number.isFinite(Number(rawFill.time)) ? Number(rawFill.time) : observedAt,
+          startPosition: Number.isFinite(Number(rawFill.startPosition)) ? Number(rawFill.startPosition) : Number(rawFill.positionAfter) - signedSize,
+          oid: rawFill.oid ?? rawFill.targetOrderId ?? null,
+        };
+        const key = fillId(pair.targetAddress, fill);
+        if (this.seenFillIds.has(key, fill.time)) continue;
+        this.seenFillIds.add(key, fill.time);
+        if (context) context.targetLastFillTime = Math.max(context.targetLastFillTime ?? 0, fill.time);
+        this.engine.onTargetFill(pair.targetAddress, fill);
+      }
       if (fills.length > 0) this.engine.onTargetSnapshot(pair.targetAddress, venue.getSnapshot(pairId));
     }
   }
 
   async #tryBootstrap(context) {
+    if (this.#isTerminalContext(context)) return;
     if (context.bootstrapped || !context.snapshot || !context.orders) return;
-    const targetSnapshot = targetSnapshotFor(context.snapshot, context.capitalUsd);
-    await this.engine.bootstrapPair(context.pairId, { sourceSnapshot: context.snapshot, targetSnapshot, sourceOpenOrders: context.orders });
-    context.bootstrapped = true;
-    for (const event of context.buffer.splice(0).sort((left, right) => left.sequence - right.sequence)) {
-      if (event.type === "fill") this.engine.onSourceFill(context.sourceAddress, event.fill);
-      else await this.engine.onSourceOrder(context.sourceAddress, event.update);
+    if (context.bootstrapPromise) return context.bootstrapPromise;
+    context.bootstrapPromise = (async () => {
+      if (context.recoveredOrderOwnership.size) {
+        if (typeof this.engine.restoreOrderOwnership !== "function") throw new Error(`Engine does not support fail-closed order ownership recovery for ${context.pairId}`);
+        this.engine.restoreOrderOwnership(context.pairId, {
+          sourceOrderToTargetCloid: Object.fromEntries(context.recoveredOrderOwnership),
+          // A virtual PAPER venue is recreated independently. It must retain
+          // the canonical Cloid, but cannot claim an unobserved live order.
+          targetOpenOrders: [],
+          requireTargetOpen: false,
+          preserveExistingShadow: false,
+        });
+        context.recoveredOrderOwnership.clear();
+      }
+      const targetSnapshot = targetSnapshotFor(context.snapshot, context.capitalUsd);
+      await this.engine.bootstrapPair(context.pairId, {
+        sourceSnapshot: context.snapshot,
+        targetSnapshot,
+        sourceOpenOrders: context.orders,
+        currentMarks: this.currentMarks,
+      });
+      context.bootstrapped = true;
+      for (const event of context.buffer.splice(0).sort((left, right) => left.sequence - right.sequence)) {
+        if (event.type === "fill") this.engine.onSourceFill(context.sourceAddress, event.fill);
+        else await this.engine.onSourceOrder(context.sourceAddress, event.update);
+      }
+      await this.engine.whenIdle();
+      this.log({ type: "PAPER_PAIR_BOOTSTRAPPED", pairId: context.pairId, sourceAddress: context.sourceAddress, capitalUsd: context.capitalUsd, at: Date.now() });
+    })();
+    try {
+      return await context.bootstrapPromise;
+    } finally {
+      context.bootstrapPromise = null;
     }
-    await this.engine.whenIdle();
-    this.log({ type: "PAPER_PAIR_BOOTSTRAPPED", pairId: context.pairId, sourceAddress: context.sourceAddress, capitalUsd: context.capitalUsd, at: Date.now() });
+  }
+
+  async #decorateOrders(context, orders) {
+    return Promise.all(orders.map(async (order) => ({
+      ...order,
+      leverage: await context.leverage.resolve(order.coin, () => this.info.activeLeverage(context.sourceAddress, order.coin)),
+      poolId: context.mode === "UNIFIED" ? "unified" : order.poolId,
+    })));
+  }
+
+  async #acceptSnapshot(context, payload) {
+    if (this.#isTerminalContext(context)) return;
+    const portfolioEquityUsd = context.mode === "UNIFIED" ? await this.info.portfolioEquity(context.sourceAddress) : null;
+    const snapshot = parseAllDexsAccountSnapshot({ payload, accountMode: context.mode, portfolioEquityUsd });
+    context.snapshot = snapshot;
+    for (const position of snapshot.positions) {
+      context.leverage.seed(position.coin, position.leverage);
+      await this.#ensureBook(position.coin);
+    }
+    if (context.bootstrapped) this.engine.onSourceSnapshot(context.sourceAddress, snapshot);
+  }
+
+  #applyRecovery(context, checkpoint) {
+    if (!checkpoint) return;
+    if (checkpoint.sourceAddress && normalizeAddress(checkpoint.sourceAddress) !== context.sourceAddress) throw new Error(`Recovery source mismatch for ${context.pairId}`);
+    if (checkpoint.targetAddress && normalizeAddress(checkpoint.targetAddress) !== context.targetAddress) throw new Error(`Recovery target mismatch for ${context.pairId}`);
+    const recoveredMode = String(checkpoint.accountMode ?? "").trim().toUpperCase();
+    if (recoveredMode && recoveredMode !== "UNKNOWN" && recoveredMode !== context.mode) throw new Error(`Recovery account mode changed for ${context.pairId}`);
+    context.lastFillTime = Number.isFinite(Number(checkpoint.lastSourceFillTime ?? checkpoint.lastFillTime))
+      ? Number(checkpoint.lastSourceFillTime ?? checkpoint.lastFillTime)
+      : context.lastFillTime;
+    context.targetLastFillTime = Number.isFinite(Number(checkpoint.lastTargetFillTime))
+      ? Number(checkpoint.lastTargetFillTime)
+      : context.targetLastFillTime;
+    for (const key of checkpoint.recentSourceFillIds ?? checkpoint.recentFillIds ?? []) this.seenFillIds.add(key, context.lastFillTime ?? Date.now());
+    for (const key of checkpoint.recentTargetFillIds ?? []) this.seenFillIds.add(key, context.targetLastFillTime ?? Date.now());
+    context.recoveredOrderOwnership = this.#parseRecoveredOrderOwnership(context.pairId, checkpoint.sourceOrderToTargetCloid);
+  }
+
+  #recoveryPair(context, actor) {
+    const ids = this.seenFillIds.snapshot();
+    const sourcePrefix = `${context.sourceAddress}|`;
+    const targetPrefix = `${context.targetAddress}|`;
+    const sourceOrderToTargetCloid = Object.fromEntries((actor?.targetOrderState ?? []).flatMap((order) => {
+      const sourceOrderId = order?.sourceOrderId;
+      const targetOrderId = order?.targetOrderId ?? order?.clientOrderId;
+      if (sourceOrderId == null || targetOrderId == null) return [];
+      const normalizedSourceOrderId = String(sourceOrderId);
+      const normalizedTargetCloid = String(targetOrderId);
+      if (canonicalTargetCloid(context.pairId, normalizedSourceOrderId) !== normalizedTargetCloid) {
+        throw new Error(`Engine emitted a non-canonical target Cloid for ${context.pairId}/${normalizedSourceOrderId}`);
+      }
+      return [[normalizedSourceOrderId, normalizedTargetCloid]];
+    }));
+    return {
+      pairId: context.pairId,
+      sourceAddress: context.sourceAddress,
+      targetAddress: context.targetAddress,
+      lastSourceFillTime: context.lastFillTime,
+      lastTargetFillTime: context.targetLastFillTime,
+      recentSourceFillIds: ids.filter((entry) => entry.id.startsWith(sourcePrefix)).map((entry) => entry.id),
+      recentTargetFillIds: ids.filter((entry) => entry.id.startsWith(targetPrefix)).map((entry) => entry.id),
+      sourceOrderToTargetCloid,
+      accountMode: context.mode ?? "UNKNOWN",
+      lastSourceSnapshotAt: Number.isFinite(Number(context.snapshot?.receivedAt)) ? Number(context.snapshot.receivedAt) : null,
+      lastTargetSnapshotAt: Number.isFinite(Number(actor?.targetSnapshot?.receivedAt)) ? Number(actor.targetSnapshot.receivedAt) : null,
+      killSwitch: actor?.killed === true || actor?.blocked === true,
+    };
   }
 }

@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  canonicalTargetCloid,
+  MIRROR_FAILURE_CODES,
+  marginPoolEquityUsd,
+  normalizeCoin,
   reconciliationDelta,
   scaleSourceOrder,
   sourcePositionAfterFill,
@@ -33,6 +37,24 @@ test("cross position copies economic exposure and leverage without multiplying l
   assert.deepEqual(desired.leverage, { type: "cross", value: 10 });
 });
 
+test("short cross exposure remains negative and does not apply leverage twice", () => {
+  const sourcePosition = {
+    coin: "ETH",
+    signedSize: -4,
+    markPriceUsd: 2_500,
+    positionValueUsd: 10_000,
+    leverage: { type: "cross", value: 20 },
+  };
+  const desired = targetPositionFromSource({
+    sourcePosition,
+    sourceSnapshot: snapshot(2_000),
+    targetSnapshot: snapshot(100),
+  });
+  assert.equal(desired.targetSignedNotionalUsd, -500);
+  assert.equal(desired.targetSignedSize, -0.2);
+  assert.equal(desired.leverage.value, 20);
+});
+
 test("isolated position copies notional and actual margin ratio", () => {
   const sourcePosition = {
     coin: "SOL",
@@ -52,6 +74,27 @@ test("isolated position copies notional and actual margin ratio", () => {
   assert.equal(desired.targetSignedSize, 2);
   assert.equal(desired.isolatedMarginRatio, 0.2);
   assert.equal(desired.targetIsolatedMarginUsd, 40);
+});
+
+test("isolated position without observed margin fails closed", () => {
+  const sourcePosition = {
+    coin: "SOL",
+    signedSize: 2,
+    markPriceUsd: 100,
+    positionValueUsd: 200,
+    leverage: { type: "isolated", value: 5 },
+  };
+  assert.throws(
+    () => targetPositionFromSource({ sourcePosition, sourceSnapshot: snapshot(1_000), targetSnapshot: snapshot(100) }),
+    (error) => error.code === MIRROR_FAILURE_CODES.ISOLATED_MARGIN_DATA_UNAVAILABLE,
+  );
+});
+
+test("a missing non-default margin pool fails closed instead of falling back to account equity", () => {
+  assert.throws(
+    () => marginPoolEquityUsd(snapshot(100), "cross-main"),
+    (error) => error.code === MIRROR_FAILURE_CODES.MARGIN_POOL_DATA_UNAVAILABLE,
+  );
 });
 
 test("source fill immediately determines post-fill signed position", () => {
@@ -75,6 +118,58 @@ test("reduce-only source order is capped by target position", () => {
     targetPositionSize: 0.25,
   });
   assert.equal(order.targetRemainingSize, 0.25);
+  assert.deepEqual(order.leverage, { type: "cross", value: 5 });
+});
+
+test("reduce-only order cannot increase or reverse the target position", () => {
+  const order = scaleSourceOrder({
+    sourceOrder: {
+      id: "bad-reduce",
+      coin: "ETH",
+      side: "B",
+      price: 2_000,
+      remainingSize: 10,
+      reduceOnly: true,
+      leverage: { type: "cross", value: 5 },
+    },
+    sourceSnapshot: snapshot(1_000),
+    targetSnapshot: snapshot(100),
+    targetPositionSize: 0.25,
+  });
+  assert.equal(order.targetRemainingSize, 0);
+});
+
+test("sub-minimum shadow order carries its scaled amount as tracking debt input", () => {
+  const order = scaleSourceOrder({
+    sourceOrder: {
+      id: "small",
+      coin: "ETH",
+      side: "B",
+      price: 2_000,
+      remainingSize: 0.1,
+      reduceOnly: false,
+      leverage: { type: "cross", value: 5 },
+    },
+    sourceSnapshot: snapshot(10_000),
+    targetSnapshot: snapshot(10),
+    minNotionalUsd: 1,
+  });
+  assert.equal(order.targetUnroundedRemainingSize, 0.0001);
+  assert.equal(order.targetRemainingSize, 0);
+  assert.equal(order.belowMinimum, true);
+});
+
+test("HIP-3 coin normalization is stable", () => {
+  assert.equal(normalizeCoin("xyz:eth"), "xyz:ETH");
+  assert.equal(normalizeCoin("ETH"), "ETH");
+});
+
+test("canonical Cloid is deterministic, pair-isolated, and exactly 128-bit lowercase hex", () => {
+  const first = canonicalTargetCloid("pair-a", "source-order-42");
+  assert.match(first, /^0x[a-f0-9]{32}$/);
+  assert.equal(first, canonicalTargetCloid("pair-a", "source-order-42"));
+  assert.notEqual(first, canonicalTargetCloid("pair-b", "source-order-42"));
+  assert.notEqual(first, canonicalTargetCloid("pair-a", "source-order-43"));
 });
 
 test("reconciliation uses target minus actual and respects minimum notional", () => {

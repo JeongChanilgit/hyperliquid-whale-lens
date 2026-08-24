@@ -42,6 +42,10 @@ export class PaperExecutionPort {
     this.defaultSlippageBps = options.defaultSlippageBps ?? 50;
     this.takerFeeRate = options.takerFeeRate ?? 0.00045;
     this.makerFeeRate = options.makerFeeRate ?? 0.00015;
+    this.minOrderSize = Number(options.minOrderSize ?? 0);
+    this.minNotionalUsd = Number(options.minNotionalUsd ?? 0);
+    this.maintenanceMarginRatio = Number(options.maintenanceMarginRatio ?? 0.025);
+    this.simulationModelVersion = String(options.simulationModelVersion ?? "FMV2_PAPER_APPROX_MARGIN_V1");
     this.events = [];
   }
 
@@ -61,7 +65,10 @@ export class PaperExecutionPort {
       realizedPnlUsd: prior?.realizedPnlUsd ?? 0,
       feesUsd: prior?.feesUsd ?? 0,
       fundingUsd: prior?.fundingUsd ?? 0,
+      marginState: prior?.marginState ?? { status: "HEALTHY", reason: null, approximateLiquidationRisk: false },
     };
+    pair.snapshot.simulationModelVersion = this.simulationModelVersion;
+    pair.snapshot.liquidationModel = "APPROXIMATE";
     this.pairs.set(pairId, pair);
     this.#recomputeEquity(pair);
     return { accepted: true };
@@ -101,6 +108,9 @@ export class PaperExecutionPort {
       unrealizedPnlUsd: (pair.snapshot.positions ?? []).reduce((sum, position) => sum + Number(position.unrealizedPnlUsd ?? 0), 0),
       feesUsd: pair.feesUsd,
       fundingUsd: pair.fundingUsd,
+      simulationModelVersion: this.simulationModelVersion,
+      liquidationModel: "APPROXIMATE",
+      marginState: clone(pair.marginState),
     };
   }
 
@@ -110,6 +120,9 @@ export class PaperExecutionPort {
 
   async setLeverage({ pairId, coin, leverage }) {
     const pair = this.#pair(pairId);
+    if (!leverage || !["cross", "isolated"].includes(String(leverage.type).toLowerCase()) || !(Number(leverage.value) >= 1)) {
+      return { accepted: false, status: "REJECTED", reason: "INVALID_LEVERAGE" };
+    }
     pair.leverage.set(normalizeCoin(coin), clone(leverage));
     this.#record("SET_LEVERAGE", { pairId, coin: normalizeCoin(coin), leverage });
     return { accepted: true };
@@ -118,11 +131,20 @@ export class PaperExecutionPort {
   async adjustIsolatedMargin({ pairId, coin, targetMarginUsd }) {
     const pair = this.#pair(pairId);
     const normalized = normalizeCoin(coin);
-    pair.isolatedMargin.set(normalized, Number(targetMarginUsd));
+    const nextMargin = Number(targetMarginUsd);
+    if (!(nextMargin >= 0) || !Number.isFinite(nextMargin)) return { accepted: false, status: "REJECTED", reason: "INVALID_ISOLATED_MARGIN" };
     const position = (pair.snapshot.positions ?? []).find((item) => normalizeCoin(item.coin) === normalized);
-    if (position) position.marginUsedUsd = Number(targetMarginUsd);
-    this.#record("ADJUST_ISOLATED_MARGIN", { pairId, coin: normalized, targetMarginUsd: Number(targetMarginUsd) });
-    return { accepted: true, marginUsedUsd: Number(targetMarginUsd) };
+    const poolId = position?.poolId ?? "default";
+    const currentMargin = Number(pair.isolatedMargin.get(normalized) ?? position?.marginUsedUsd ?? 0);
+    const available = this.#poolEquity(pair, poolId) - this.#reservedIsolatedMargin(pair, poolId, normalized);
+    if (nextMargin > available + currentMargin + 1e-9) {
+      this.#blockMargin(pair, pairId, "ISOLATED_MARGIN_INSUFFICIENT", { coin: normalized, targetMarginUsd: nextMargin, availableUsd: available + currentMargin });
+      return { accepted: false, status: "REJECTED", reason: "ISOLATED_MARGIN_INSUFFICIENT" };
+    }
+    pair.isolatedMargin.set(normalized, nextMargin);
+    if (position) position.marginUsedUsd = nextMargin;
+    this.#record("ADJUST_ISOLATED_MARGIN", { pairId, coin: normalized, targetMarginUsd: nextMargin });
+    return { accepted: true, marginUsedUsd: nextMargin };
   }
 
   applyFunding({ pairId, coin, amountUsd }) {
@@ -141,6 +163,11 @@ export class PaperExecutionPort {
     const coin = normalizeCoin(order.coin);
     const book = this.books.get(coin);
     const existing = pair.orders.get(order.targetOrderId);
+    const validation = this.#validateOrder(order);
+    if (!validation.accepted) {
+      this.#record("ORDER_REJECTED", { pairId, order: clone(order), reason: validation.reason });
+      return validation;
+    }
     const record = {
       ...clone(order),
       coin,
@@ -182,6 +209,11 @@ export class PaperExecutionPort {
     const side = deltaSize > 0 ? "BUY" : "SELL";
     const size = Math.abs(Number(deltaSize));
     const reference = Number(markPriceUsd);
+    const validation = this.#validateOrder({ coin: normalized, quantity: size, price: reference, side, poolId, leverage });
+    if (!validation.accepted) {
+      this.#record("PROTECTED_IOC_REJECTED", { pairId, coin: normalized, side, requestedSize: size, reason: validation.reason });
+      return { accepted: false, status: "REJECTED", reason: validation.reason, actualSignedSize: positionSizeForCoin(pair.snapshot, normalized), filledSize: 0, unfilledSize: size, averagePrice: null };
+    }
     const slippage = Number(maxSlippageBps) / 10_000;
     const limitPrice = side === "BUY" ? reference * (1 + slippage) : reference * (1 - slippage);
     const result = walkBook({ side, size, ...(this.books.get(normalized) ?? {}), limitPrice });
@@ -189,7 +221,15 @@ export class PaperExecutionPort {
       let signedFill = sideSign(side) * result.filledSize;
       const current = positionSizeForCoin(pair.snapshot, normalized);
       if (reduceOnly && current !== 0 && current * signedFill < 0 && Math.abs(signedFill) > Math.abs(current)) signedFill = -current;
-      this.#applyFill(pairId, pair, {
+      const marginCheck = this.#canApplyFill(pair, { coin: normalized, signedFillSize: signedFill, price: result.averagePrice ?? reference, poolId, leverage: leverage ?? pair.leverage.get(normalized) ?? { type: "cross", value: 1 } });
+      if (!marginCheck.accepted) {
+        this.#blockMargin(pair, pairId, marginCheck.reason, { coin: normalized, requestedSize: signedFill, price: result.averagePrice ?? reference });
+        result.unfilledSize += result.filledSize;
+        result.filledSize = 0;
+        result.filledNotionalUsd = 0;
+        result.fills = [];
+        result.averagePrice = null;
+      } else this.#applyFill(pairId, pair, {
         coin: normalized,
         signedFillSize: signedFill,
         price: result.averagePrice ?? reference,
@@ -240,6 +280,20 @@ export class PaperExecutionPort {
       order.remainingSize -= fillSize;
       order.filledSize += fillSize;
       remainingTradeSize -= fillSize;
+      const marginCheck = this.#canApplyFill(pair, {
+        coin: normalized,
+        signedFillSize: orderSide * fillSize,
+        price: Number(order.price),
+        poolId: order.poolId,
+        leverage: order.leverage ?? pair.leverage.get(normalized) ?? { type: "cross", value: 1 },
+      });
+      if (!marginCheck.accepted) {
+        order.remainingSize += fillSize;
+        order.filledSize -= fillSize;
+        remainingTradeSize += fillSize;
+        this.#blockMargin(pair, pairId, marginCheck.reason, { coin: normalized, requestedSize: orderSide * fillSize, price: Number(order.price) });
+        break;
+      }
       const fill = this.#applyFill(pairId, pair, {
         coin: normalized,
         signedFillSize: orderSide * fillSize,
@@ -275,9 +329,21 @@ export class PaperExecutionPort {
   #executeAgainstBook(pairId, pair, order, book, limitPrice, feeRate) {
     const result = walkBook({ side: order.side, size: order.remainingSize, ...(book ?? {}), limitPrice });
     if (result.filledSize > 0) {
+      const signedFillSize = sideSign(order.side) * result.filledSize;
+      const marginCheck = this.#canApplyFill(pair, {
+        coin: order.coin,
+        signedFillSize,
+        price: result.averagePrice ?? order.price,
+        poolId: order.poolId,
+        leverage: order.leverage ?? pair.leverage.get(order.coin) ?? { type: "cross", value: 1 },
+      });
+      if (!marginCheck.accepted) {
+        this.#blockMargin(pair, pairId, marginCheck.reason, { coin: order.coin, requestedSize: signedFillSize, price: result.averagePrice ?? order.price });
+        return { ...result, filledSize: 0, filledNotionalUsd: 0, averagePrice: null, unfilledSize: result.requestedSize, fills: [] };
+      }
       this.#applyFill(pairId, pair, {
         coin: order.coin,
-        signedFillSize: sideSign(order.side) * result.filledSize,
+        signedFillSize,
         price: result.averagePrice ?? order.price,
         feeRate,
         poolId: order.poolId,
@@ -350,7 +416,83 @@ export class PaperExecutionPort {
       total += equityUsd;
     }
     pair.snapshot.accountEquityUsd = total;
+    pair.snapshot.simulationModelVersion = this.simulationModelVersion;
+    pair.snapshot.liquidationModel = "APPROXIMATE";
+    const maintenanceMarginUsd = (pair.snapshot.positions ?? []).reduce((sum, position) => sum + Math.abs(Number(position.positionValueUsd ?? 0)) * this.maintenanceMarginRatio, 0);
+    const negativeEquity = total < -ZERO_EPSILON;
+    const liquidationRisk = total <= maintenanceMarginUsd + ZERO_EPSILON && (pair.snapshot.positions?.length ?? 0) > 0;
+    if (negativeEquity) {
+      pair.marginState = { status: "NEGATIVE_EQUITY", reason: "NEGATIVE_EQUITY", approximateLiquidationRisk: true, maintenanceMarginUsd };
+    } else if (liquidationRisk && pair.marginState.status === "HEALTHY") {
+      pair.marginState = { status: "LIQUIDATION_RISK_BLOCKED", reason: "APPROXIMATE_MAINTENANCE_MARGIN", approximateLiquidationRisk: true, maintenanceMarginUsd };
+    } else {
+      pair.marginState = { ...pair.marginState, maintenanceMarginUsd, approximateLiquidationRisk: pair.marginState.approximateLiquidationRisk || liquidationRisk };
+    }
+    pair.snapshot.marginState = clone(pair.marginState);
     pair.snapshot.receivedAt = this.now();
+  }
+
+  #validateOrder(order) {
+    const quantity = Number(order.quantity ?? order.remainingSize ?? order.size);
+    const price = Number(order.price ?? order.limitPrice);
+    if (!(quantity > ZERO_EPSILON) || !Number.isFinite(quantity)) return { accepted: false, status: "REJECTED", reason: "MIN_SIZE" };
+    if (!(price > 0) || !Number.isFinite(price)) return { accepted: false, status: "REJECTED", reason: "INVALID_PRICE" };
+    if (this.minOrderSize > 0 && quantity + ZERO_EPSILON < this.minOrderSize) return { accepted: false, status: "REJECTED", reason: "MIN_SIZE" };
+    if (this.minNotionalUsd > 0 && quantity * price + ZERO_EPSILON < this.minNotionalUsd) return { accepted: false, status: "REJECTED", reason: "MIN_NOTIONAL" };
+    return { accepted: true };
+  }
+
+  #poolEquity(pair, poolId) {
+    const value = Number(pair.snapshot.marginPools?.[poolId]?.equityUsd ?? pair.snapshot.accountEquityUsd);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  #reservedIsolatedMargin(pair, poolId, excludedCoin = null) {
+    let reserved = 0;
+    for (const position of pair.snapshot.positions ?? []) {
+      if (String(position.poolId ?? "default") !== String(poolId) || normalizeCoin(position.coin) === excludedCoin) continue;
+      if (String(position.leverage?.type).toLowerCase() !== "isolated") continue;
+      reserved += Math.max(0, Number(pair.isolatedMargin.get(normalizeCoin(position.coin)) ?? position.marginUsedUsd ?? 0));
+    }
+    return reserved;
+  }
+
+  #canApplyFill(pair, { coin, signedFillSize, price, poolId = "default", leverage }) {
+    const current = (pair.snapshot.positions ?? []).find((position) => normalizeCoin(position.coin) === normalizeCoin(coin));
+    const currentSize = Number(current?.signedSize ?? 0);
+    const nextSize = currentSize + Number(signedFillSize);
+    const riskReducing = Math.abs(currentSize) > ZERO_EPSILON
+      && Math.abs(nextSize) <= Math.abs(currentSize) + ZERO_EPSILON
+      && (Math.abs(nextSize) <= ZERO_EPSILON || Math.sign(nextSize) === Math.sign(currentSize));
+    if ((pair.marginState.status === "NEGATIVE_EQUITY" || pair.marginState.status === "LIQUIDATION_RISK_BLOCKED") && !riskReducing) {
+      return { accepted: false, reason: pair.marginState.reason ?? pair.marginState.status };
+    }
+    const effectiveLeverage = leverage ?? pair.leverage.get(normalizeCoin(coin));
+    const leverageValue = Number(effectiveLeverage?.value);
+    const leverageType = String(effectiveLeverage?.type ?? "").toLowerCase();
+    if (!(leverageValue >= 1) || !["cross", "isolated"].includes(leverageType)) return { accepted: false, reason: "INVALID_LEVERAGE" };
+    const requiredForCoin = Math.abs(nextSize) * Number(price) / leverageValue;
+    const poolEquity = this.#poolEquity(pair, poolId);
+    if (!(poolEquity > 0)) return { accepted: false, reason: "POOL_COLLATERAL_UNAVAILABLE" };
+    if (leverageType === "isolated") {
+      const available = poolEquity - this.#reservedIsolatedMargin(pair, poolId, normalizeCoin(coin));
+      return requiredForCoin <= available + ZERO_EPSILON ? { accepted: true } : { accepted: false, reason: "ISOLATED_MARGIN_INSUFFICIENT" };
+    }
+    let requiredCross = requiredForCoin;
+    for (const position of pair.snapshot.positions ?? []) {
+      if (normalizeCoin(position.coin) === normalizeCoin(coin) || String(position.poolId ?? "default") !== String(poolId)) continue;
+      if (String(position.leverage?.type ?? "cross").toLowerCase() !== "cross") continue;
+      const otherLeverage = Math.max(1, Number(position.leverage?.value ?? 1));
+      requiredCross += Math.abs(Number(position.signedSize)) * Number(position.markPriceUsd ?? position.entryPriceUsd ?? 0) / otherLeverage;
+    }
+    const availableCross = poolEquity - this.#reservedIsolatedMargin(pair, poolId);
+    return requiredCross <= availableCross + ZERO_EPSILON ? { accepted: true } : { accepted: false, reason: "CROSS_MARGIN_INSUFFICIENT" };
+  }
+
+  #blockMargin(pair, pairId, reason, detail) {
+    pair.marginState = { ...pair.marginState, status: "LIQUIDATION_RISK_BLOCKED", reason, approximateLiquidationRisk: true };
+    pair.snapshot.marginState = clone(pair.marginState);
+    this.#record("MARGIN_RISK_BLOCKED", { pairId, reason, ...detail, simulationModelVersion: this.simulationModelVersion });
   }
 
   #queueAhead(book, order) {

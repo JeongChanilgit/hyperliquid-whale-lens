@@ -1,6 +1,7 @@
 {
   "mode": "PAPER",
   "testnet": false,
+  "autoStart": false,
   "consoleLog": true,
   "pairs": [
     {
@@ -32,10 +33,15 @@
   "audit": {
     "eventsPath": "data/faithful-mirror-v2/events.jsonl",
     "snapshotPath": "data/faithful-mirror-v2/latest-state.json",
+    "recoveryPath": "data/faithful-mirror-v2/recovery-checkpoint.json",
     "snapshotIntervalMs": 5000
   },
   "control": {
     "host": "127.0.0.1",
     "port": 8790
+  },
+  "live": {
+    "exclusiveTargetAccount": true,
+    "adoptExistingTargetState": false
   }
 }

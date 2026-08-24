@@ -36,12 +36,51 @@ const orderFingerprint = (order) => [
   order.leverage.type,
   order.leverage.value,
 ].join("|");
+const sourceOrderDebtFingerprint = (order) => [
+  order.id,
+  order.coin,
+  order.poolId,
+  order.side,
+  order.price,
+  order.triggerPrice ?? "",
+  order.orderType,
+  order.tif,
+  order.reduceOnly,
+  order.size,
+  order.remainingSize,
+  order.status,
+  order.leverage.type,
+  order.leverage.value,
+].join("|");
+const debtMaterial = (debt) => ({
+  ...(debt.sourceOrderId != null
+    ? {
+      kind: "ORDER",
+      coin: String(debt.coin),
+      sourceOrderId: String(debt.sourceOrderId),
+      // A source-order edit is material; follower equity/mark scaling is not.
+      sourceOrderFingerprint: String(debt.sourceOrderFingerprint ?? ""),
+    }
+    : {
+      kind: "POSITION",
+      coin: String(debt.coin),
+      // Position residuals below the immediate execution threshold are a
+      // single durable debt. Their amount, mark-derived notional, or even
+      // side may oscillate while the exchange catches up; audit only its
+      // lifecycle, not every transient state.
+      reason: String(debt.reason ?? ""),
+    }),
+});
+const sameTrackingDebt = (left, right) => JSON.stringify(debtMaterial(left)) === JSON.stringify(debtMaterial(right));
 
 export class FaithfulPairActor {
   constructor({ pairId, sourceAddress, targetAddress, execution, config = {}, now = Date.now, log = () => {} }) {
     this.pairId = String(pairId);
     this.sourceAddress = normalizeAddress(sourceAddress);
     this.targetAddress = normalizeAddress(targetAddress);
+    if (this.sourceAddress === this.targetAddress) {
+      throw new Error(`Pair ${this.pairId} cannot use the same source and target address`);
+    }
     this.execution = execution;
     this.config = { ...DEFAULT_MIRROR_CONFIG, ...config };
     this.now = now;
@@ -53,7 +92,11 @@ export class FaithfulPairActor {
     this.sourceOrderByTarget = new Map();
     this.targetOrderState = new Map();
     this.shadowStateBySource = new Map();
+    this.pendingOrderOwnershipRecovery = null;
     this.leverageCache = new Map();
+    this.currentMarks = new Map();
+    this.positionTrackingDebtByCoin = new Map();
+    this.orderTrackingDebtBySource = new Map();
     this.dirtyCoins = new Set();
     this.dirtyReasons = new Map();
     this.reconciliationRunning = false;
@@ -63,7 +106,12 @@ export class FaithfulPairActor {
     this.generationByCoin = new Map();
     this.pendingOrderCancellations = new Map();
     this.initialized = false;
+    this.bootstrapping = false;
+    this.bufferedEvents = [];
     this.stopped = false;
+    this.blocked = false;
+    this.killed = false;
+    this.state = "STARTING";
     this.lastError = null;
     this.stats = {
       sourceFills: 0,
@@ -75,14 +123,51 @@ export class FaithfulPairActor {
       canceledOrders: 0,
       reconciliations: 0,
       terminalResiduals: 0,
+      shadowCreates: 0,
+      shadowModifies: 0,
+      shadowCancels: 0,
+      immediateCatchUps: 0,
+      verification250ms: 0,
+      verification1000ms: 0,
+      pairFailures: 0,
     };
   }
 
-  async bootstrap({ sourceSnapshot, targetSnapshot, sourceOpenOrders = [] }) {
+  /**
+   * Queue checked ownership for the next bootstrap. Recovery is deliberately
+   * pre-bootstrap only, so it cannot overwrite a newer exchange observation.
+   */
+  restoreOrderOwnership({ sourceOrderToTargetCloid, targetOpenOrders = [], requireTargetOpen = true, preserveExistingShadow = requireTargetOpen } = {}) {
+    if (this.initialized) throw new Error(`Pair ${this.pairId} can only restore order ownership before bootstrap`);
+    if (!sourceOrderToTargetCloid || typeof sourceOrderToTargetCloid !== "object" || Array.isArray(sourceOrderToTargetCloid)) {
+      throw new Error(`Pair ${this.pairId} recovery order mapping is required`);
+    }
+    if (!Array.isArray(targetOpenOrders)) throw new Error(`Pair ${this.pairId} recovery target orders must be an array`);
+    const ownership = new Map();
+    for (const [rawSourceOrderId, rawTargetCloid] of Object.entries(sourceOrderToTargetCloid)) {
+      const sourceOrderId = String(rawSourceOrderId);
+      const targetCloid = String(rawTargetCloid);
+      if (!sourceOrderId || !targetCloid || sourceOrderId.trim() !== sourceOrderId || targetCloid !== deterministicTargetOrderId(this.pairId, sourceOrderId)) {
+        throw new Error(`Pair ${this.pairId} recovery target Cloid is non-canonical for ${sourceOrderId || "<missing>"}`);
+      }
+      ownership.set(sourceOrderId, targetCloid);
+    }
+    this.pendingOrderOwnershipRecovery = {
+      ownership,
+      targetOpenOrders: targetOpenOrders.map(clone),
+      requireTargetOpen: requireTargetOpen !== false,
+      preserveExistingShadow: preserveExistingShadow === true,
+    };
+    return { accepted: true, recoveredOrders: ownership.size };
+  }
+
+  async bootstrap({ sourceSnapshot, targetSnapshot, sourceOpenOrders = [], currentMarks = null }) {
     if (this.initialized) throw new Error(`Pair ${this.pairId} is already initialized`);
     if (this.stopped) throw new Error(`Pair ${this.pairId} is stopped`);
+    this.state = "BOOTSTRAPPING";
     this.sourceSnapshot = cloneSnapshot(sourceSnapshot);
     this.targetSnapshot = cloneSnapshot(targetSnapshot);
+    this.#ingestCurrentMarks(currentMarks);
     if (!(this.sourceSnapshot.accountEquityUsd > 0) || !(this.targetSnapshot.accountEquityUsd > 0)) {
       throw new Error(`Pair ${this.pairId} bootstrap requires positive source and target equity`);
     }
@@ -100,16 +185,43 @@ export class FaithfulPairActor {
       ...(this.targetSnapshot.positions ?? []).map((position) => normalizeCoin(position.coin)),
     ]);
     this.initialized = true;
+    this.bootstrapping = true;
     for (const coin of initialCoins) this.#markDirty(coin, "BOOTSTRAP_POSITION");
     await this.whenIdle();
+    if (this.blocked || this.killed) {
+      this.bootstrapping = false;
+      this.bufferedEvents.length = 0;
+      return this.snapshot();
+    }
     for (const order of startupOrders) this.sourceOrders.set(order.id, order);
+    this.#hydrateRecoveredOrderOwnership(startupOrders);
     for (const order of startupOrders) await this.#mirrorOrder(order);
-    this.#record("PAIR_READY", { sourceOpenOrderCount: startupOrders.length });
+    this.bootstrapping = false;
+    for (const event of this.bufferedEvents.splice(0)) {
+      if (event.type === "SOURCE_FILL") this.onSourceFill(event.payload);
+      else if (event.type === "SOURCE_ORDER") await this.onSourceOrder(event.payload);
+      else if (event.type === "SOURCE_ORDERS") await this.syncSourceOrders(event.payload);
+      else if (event.type === "SOURCE_SNAPSHOT") this.onSourceSnapshot(event.payload);
+      else if (event.type === "TARGET_FILL") this.onTargetFill(event.payload);
+      else if (event.type === "TARGET_ORDER") this.onTargetOrder(event.payload);
+      else if (event.type === "TARGET_ORDERS") this.syncTargetOrders(event.payload);
+      else if (event.type === "TARGET_SNAPSHOT") this.onTargetSnapshot(event.payload);
+      else if (event.type === "CURRENT_MARK") this.onCurrentMark(event.payload.coin, event.payload.markPriceUsd);
+    }
+    await this.whenIdle();
+    if (!this.blocked && !this.killed) {
+      this.state = "RUNNING";
+      this.#record("PAIR_READY", { sourceOpenOrderCount: startupOrders.length });
+    }
     return this.snapshot();
   }
 
   async onSourceOrder(update) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("SOURCE_ORDER", update);
+      return;
+    }
     this.stats.sourceOrderUpdates += 1;
     const order = this.#normalizeSourceOrder(update.order ?? update);
     const status = String(update.status ?? order.status ?? "OPEN").toUpperCase();
@@ -117,6 +229,7 @@ export class FaithfulPairActor {
     if (statusIsTerminal(status)) {
       this.sourceOrders.delete(order.id);
       this.shadowStateBySource.delete(order.id);
+      this.#clearOrderTrackingDebt(order.id, "SOURCE_TERMINAL");
       await this.#cancelMirroredOrder(order.id, `SOURCE_${status}`);
     } else {
       this.sourceOrders.set(order.id, order);
@@ -128,6 +241,10 @@ export class FaithfulPairActor {
 
   async syncSourceOrders(openOrders) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("SOURCE_ORDERS", openOrders);
+      return;
+    }
     const incoming = new Map();
     for (const raw of openOrders ?? []) {
       const order = this.#normalizeSourceOrder(raw);
@@ -138,6 +255,7 @@ export class FaithfulPairActor {
       const removed = this.sourceOrders.get(sourceOrderId);
       this.sourceOrders.delete(sourceOrderId);
       this.shadowStateBySource.delete(sourceOrderId);
+      this.#clearOrderTrackingDebt(sourceOrderId, "SOURCE_SNAPSHOT_REMOVED");
       await this.#cancelMirroredOrder(sourceOrderId, "SOURCE_SNAPSHOT_REMOVED");
       if (removed) this.#markDirty(removed.coin, "SOURCE_ORDER_SNAPSHOT");
     }
@@ -150,6 +268,10 @@ export class FaithfulPairActor {
 
   onSourceFill(fill) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("SOURCE_FILL", fill);
+      return;
+    }
     this.stats.sourceFills += 1;
     const coin = normalizeCoin(fill.coin);
     const afterSize = sourcePositionAfterFill(fill);
@@ -177,6 +299,7 @@ export class FaithfulPairActor {
         if (order.remainingSize <= ZERO_EPSILON) {
           this.sourceOrders.delete(order.id);
           this.shadowStateBySource.delete(order.id);
+          this.#clearOrderTrackingDebt(order.id, "SOURCE_FILLED");
           this.#queueOrderCancellation(coin, this.#cancelMirroredOrder(order.id, "SOURCE_FILLED"));
         } else {
           this.shadowStateBySource.delete(order.id);
@@ -190,6 +313,10 @@ export class FaithfulPairActor {
 
   onTargetFill(fill) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("TARGET_FILL", fill);
+      return;
+    }
     this.stats.targetFills += 1;
     const coin = normalizeCoin(fill.coin);
     const targetPosition = sourcePositionForCoin(this.targetSnapshot, coin);
@@ -214,6 +341,10 @@ export class FaithfulPairActor {
 
   onTargetOrder(update) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("TARGET_ORDER", update);
+      return;
+    }
     this.stats.targetOrderUpdates += 1;
     this.execution.onTargetOrder?.({ pairId: this.pairId, update: clone(update) });
     const sourceOrderId = update.sourceOrderId != null ? String(update.sourceOrderId) : null;
@@ -242,6 +373,10 @@ export class FaithfulPairActor {
 
   syncTargetOrders(openOrders) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("TARGET_ORDERS", openOrders);
+      return;
+    }
     const openByTargetId = new Map();
     for (const raw of openOrders ?? []) {
       const targetOrderId = raw.targetOrderId != null ? String(raw.targetOrderId) : raw.clientOrderId != null ? String(raw.clientOrderId) : null;
@@ -250,7 +385,12 @@ export class FaithfulPairActor {
     }
     for (const [targetOrderId, sourceOrderId] of this.sourceOrderByTarget) {
       const observed = openByTargetId.get(targetOrderId);
-      if (observed) this.targetOrderState.set(targetOrderId, observed);
+      if (observed) {
+        const previous = this.targetOrderState.get(targetOrderId) ?? {};
+        // A REST target snapshot has exchange facts but no source OID. Keep
+        // recovered ownership so the next checkpoint remains replay-safe.
+        this.targetOrderState.set(targetOrderId, { ...previous, ...observed, targetOrderId, sourceOrderId });
+      }
       else {
         const previous = this.targetOrderState.get(targetOrderId);
         this.targetOrderState.set(targetOrderId, { ...(previous ?? {}), targetOrderId, status: "TERMINAL_OR_MISSING" });
@@ -262,22 +402,55 @@ export class FaithfulPairActor {
 
   onSourceSnapshot(snapshot) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("SOURCE_SNAPSHOT", snapshot);
+      return;
+    }
     this.sourceSnapshot = cloneSnapshot(snapshot);
     this.#markAllCoinsDirty("SOURCE_SNAPSHOT");
   }
 
   onTargetSnapshot(snapshot) {
     this.#requireReady();
+    if (this.bootstrapping) {
+      this.#buffer("TARGET_SNAPSHOT", snapshot);
+      return;
+    }
     this.targetSnapshot = cloneSnapshot(snapshot);
     this.#markAllCoinsDirty("TARGET_SNAPSHOT");
   }
 
+  onCurrentMark(coin, markPriceUsd) {
+    this.#requireReady();
+    const normalizedCoin = normalizeCoin(coin);
+    const mark = Number(markPriceUsd);
+    if (!Number.isFinite(mark) || mark <= 0) throw new Error(`Current mark for ${normalizedCoin} must be positive`);
+    this.currentMarks.set(normalizedCoin, mark);
+    if (this.bootstrapping) {
+      this.#buffer("CURRENT_MARK", { coin: normalizedCoin, markPriceUsd: mark });
+      return;
+    }
+    this.#markDirty(normalizedCoin, "CURRENT_MARK");
+  }
+
   async whenIdle() {
-    while (this.reconciliationPromise) await this.reconciliationPromise;
+    // A websocket callback can mark a coin dirty immediately before its async
+    // drain publishes reconciliationPromise. Yield once, then wait for both
+    // the published promise and any still-pending dirty state.
+    await Promise.resolve();
+    while (this.reconciliationPromise || this.reconciliationRunning || this.dirtyCoins.size > 0) {
+      if (this.reconciliationPromise) await this.reconciliationPromise;
+      else await Promise.resolve();
+    }
+  }
+
+  isTerminal() {
+    return this.killed || this.blocked || this.stopped;
   }
 
   stop() {
     this.stopped = true;
+    if (!this.killed) this.state = "STOPPED";
     for (const timer of this.verificationTimers.values()) clearTimeout(timer);
     for (const timer of this.terminalTimers.values()) clearTimeout(timer);
     this.verificationTimers.clear();
@@ -290,14 +463,31 @@ export class FaithfulPairActor {
       sourceAddress: this.sourceAddress,
       targetAddress: this.targetAddress,
       initialized: this.initialized,
+      state: this.state,
       stopped: this.stopped,
+      blocked: this.blocked,
+      killed: this.killed,
       lastError: this.lastError,
       sourceSnapshot: clone(this.sourceSnapshot),
       targetSnapshot: clone(this.targetSnapshot),
       sourceOrders: [...this.sourceOrders.values()].map(clone),
       targetOrderState: [...this.targetOrderState.values()].map(clone),
+      trackingDebt: {
+        positions: [...this.positionTrackingDebtByCoin.values()].map(clone),
+        orders: [...this.orderTrackingDebtBySource.values()].map(clone),
+      },
       dirtyCoins: [...this.dirtyCoins],
       stats: clone(this.stats),
+      metrics: {
+        source_fill_count: this.stats.sourceFills,
+        source_order_update_count: this.stats.sourceOrderUpdates,
+        shadow_create_count: this.stats.shadowCreates,
+        shadow_modify_count: this.stats.shadowModifies,
+        shadow_cancel_count: this.stats.shadowCancels,
+        immediate_catchup_count: this.stats.immediateCatchUps,
+        terminal_residual_count: this.stats.terminalResiduals,
+        pair_failure_count: this.stats.pairFailures,
+      },
     };
   }
 
@@ -316,7 +506,8 @@ export class FaithfulPairActor {
           } catch (error) {
             this.lastError = error instanceof Error ? error.message : String(error);
             this.#record("RECONCILE_ERROR", { coin, reasons, message: this.lastError });
-            throw error;
+            await this.#blockPair(error, { coin, reasons, phase: "RECONCILIATION" });
+            break;
           }
         }
       } finally {
@@ -353,6 +544,11 @@ export class FaithfulPairActor {
       minNotionalUsd: this.config.immediateResidualNotionalUsd,
       sizeStep: desired.sizeStep ?? 0,
     });
+    if (!delta.tradeable && Math.abs(delta.rawDeltaSize) > ZERO_EPSILON) {
+      this.#setPositionTrackingDebt(coin, desired, actualSize, delta, reasons);
+    } else {
+      this.#clearPositionTrackingDebt(coin, "POSITION_RECONCILED");
+    }
     let catchUpSubmitted = false;
     if (delta.tradeable) {
       catchUpSubmitted = true;
@@ -370,6 +566,7 @@ export class FaithfulPairActor {
         poolId: desired.poolId,
       });
       this.stats.catchUpOrders += 1;
+      if (!reasons.some((reason) => String(reason).startsWith("VERIFY_"))) this.stats.immediateCatchUps += 1;
       this.#record("CATCH_UP", {
         coin,
         reasons,
@@ -377,6 +574,7 @@ export class FaithfulPairActor {
         actualSize,
         deltaSize: delta.deltaSize,
         accepted: result?.accepted === true,
+        reason: result?.reason ?? null,
         filledSize: result?.filledSize ?? 0,
         unfilledSize: result?.unfilledSize ?? 0,
         averagePrice: result?.averagePrice ?? null,
@@ -394,7 +592,52 @@ export class FaithfulPairActor {
       }
     }
     await this.#reconcileIsolatedMargin(desired);
-    if (catchUpSubmitted) this.#scheduleVerification(coin);
+    if (catchUpSubmitted && !reasons.some((reason) => String(reason).startsWith("VERIFY_"))) {
+      this.#scheduleVerification(coin);
+    }
+  }
+
+  #hydrateRecoveredOrderOwnership(startupOrders) {
+    const recovery = this.pendingOrderOwnershipRecovery;
+    this.pendingOrderOwnershipRecovery = null;
+    if (!recovery?.ownership?.size) return;
+    const sourceById = new Map(startupOrders.map((order) => [order.id, order]));
+    const targetByCloid = new Map(recovery.targetOpenOrders.flatMap((order) => {
+      const targetCloid = order?.targetOrderId ?? order?.clientOrderId;
+      return targetCloid ? [[String(targetCloid), order]] : [];
+    }));
+    for (const [sourceOrderId, targetCloid] of recovery.ownership) {
+      const sourceOrder = sourceById.get(sourceOrderId);
+      // The source order closed while offline; do not resurrect or cancel a
+      // stale target order solely because a recovery checkpoint mentioned it.
+      if (!sourceOrder) continue;
+      const targetOrder = targetByCloid.get(targetCloid);
+      if (recovery.requireTargetOpen && !targetOrder) {
+        throw new Error(`Pair ${this.pairId} recovered target Cloid is absent for ${sourceOrderId}`);
+      }
+      this.targetOrderBySource.set(sourceOrderId, targetCloid);
+      this.sourceOrderByTarget.set(targetCloid, sourceOrderId);
+      if (!targetOrder) continue;
+      const update = {
+        ...clone(targetOrder),
+        sourceOrderId,
+        targetOrderId: targetCloid,
+        exchangeOrderId: targetOrder.id ?? null,
+        status: String(targetOrder.status ?? "OPEN").toUpperCase(),
+      };
+      this.targetOrderState.set(targetCloid, update);
+      this.execution.onTargetOrder?.({ pairId: this.pairId, update: clone(update) });
+      if (!recovery.preserveExistingShadow) continue;
+      const scaled = scaleSourceOrder({
+        sourceOrder,
+        sourceSnapshot: this.sourceSnapshot,
+        targetSnapshot: this.targetSnapshot,
+        targetPositionSize: positionSizeForCoin(this.targetSnapshot, sourceOrder.coin),
+        minNotionalUsd: this.config.minimumOrderNotionalUsd,
+        sizeStep: this.config.minimumOrderSize,
+      });
+      if (scaled.targetRemainingSize > ZERO_EPSILON) this.shadowStateBySource.set(sourceOrderId, { fingerprint: orderFingerprint(scaled), at: this.now() });
+    }
   }
 
   async #mirrorOrdersForCoin(coin) {
@@ -414,15 +657,31 @@ export class FaithfulPairActor {
       sourceSnapshot: this.sourceSnapshot,
       targetSnapshot: this.targetSnapshot,
       targetPositionSize: positionSizeForCoin(this.targetSnapshot, order.coin),
+      minNotionalUsd: this.config.minimumOrderNotionalUsd,
+      sizeStep: this.config.minimumOrderSize,
     });
     const priorShadow = this.shadowStateBySource.get(order.id);
     const fingerprint = orderFingerprint(scaled);
     if (scaled.targetRemainingSize <= ZERO_EPSILON) {
+      if (scaled.targetUnroundedRemainingSize > ZERO_EPSILON) {
+        this.#setOrderTrackingDebt(order.id, {
+          sourceOrderId: order.id,
+          coin: order.coin,
+          targetUnroundedRemainingSize: scaled.targetUnroundedRemainingSize,
+          targetNotionalUsd: scaled.targetUnroundedRemainingSize * scaled.price,
+          priceUsd: scaled.price,
+          sourceOrderFingerprint: sourceOrderDebtFingerprint(order),
+          reason: scaled.belowMinimum ? "SCALED_BELOW_MINIMUM" : "SCALED_TO_ZERO",
+          at: this.now(),
+        });
+      }
       await this.#cancelMirroredOrder(order.id, "SCALED_TO_ZERO");
       return;
     }
+    this.#clearOrderTrackingDebt(order.id, "ORDER_BECAME_TRACKABLE");
     if (priorShadow?.fingerprint === fingerprint && this.targetOrderBySource.has(order.id)) return;
     const targetOrderId = this.targetOrderBySource.get(order.id) ?? deterministicTargetOrderId(this.pairId, order.id);
+    const isModify = this.targetOrderBySource.has(order.id);
     const cachedLeverage = this.leverageCache.get(order.coin);
     if (!sameLeverage(cachedLeverage, scaled.leverage)) {
       const leverageResult = await this.execution.setLeverage({ pairId: this.pairId, coin: order.coin, leverage: scaled.leverage });
@@ -461,11 +720,14 @@ export class FaithfulPairActor {
       reduceOnly: scaled.reduceOnly,
     });
     this.stats.mirroredOrders += 1;
+    if (isModify) this.stats.shadowModifies += 1;
+    else this.stats.shadowCreates += 1;
   }
 
   async #cancelMirroredOrder(sourceOrderId, reason) {
     const targetOrderId = this.targetOrderBySource.get(String(sourceOrderId));
     this.shadowStateBySource.delete(String(sourceOrderId));
+    if (reason !== "SCALED_TO_ZERO") this.#clearOrderTrackingDebt(String(sourceOrderId), reason);
     if (!targetOrderId) return;
     const result = await this.execution.cancelOrder({ pairId: this.pairId, targetOrderId, sourceOrderId: String(sourceOrderId), reason });
     if (!result?.accepted) throw new Error(`Unable to cancel target order ${targetOrderId}`);
@@ -473,17 +735,26 @@ export class FaithfulPairActor {
     this.sourceOrderByTarget.delete(targetOrderId);
     this.targetOrderState.set(targetOrderId, { ...(this.targetOrderState.get(targetOrderId) ?? {}), targetOrderId, status: "CANCELED", reason });
     this.stats.canceledOrders += 1;
+    this.stats.shadowCancels += 1;
   }
 
   #desiredPosition(coin) {
     const sourcePosition = sourcePositionForCoin(this.sourceSnapshot, coin);
     if (sourcePosition && Math.abs(Number(sourcePosition.signedSize)) > ZERO_EPSILON) {
-      return targetPositionFromSource({ sourcePosition, sourceSnapshot: this.sourceSnapshot, targetSnapshot: this.targetSnapshot });
+      const currentMark = this.currentMarks.get(normalizeCoin(coin));
+      const markedSourcePosition = currentMark == null
+        ? sourcePosition
+        : {
+          ...sourcePosition,
+          markPriceUsd: currentMark,
+          positionValueUsd: Math.abs(Number(sourcePosition.signedSize)) * currentMark,
+        };
+      return targetPositionFromSource({ sourcePosition: markedSourcePosition, sourceSnapshot: this.sourceSnapshot, targetSnapshot: this.targetSnapshot });
     }
     const targetPosition = sourcePositionForCoin(this.targetSnapshot, coin);
     const sourceOrder = [...this.sourceOrders.values()].find((order) => order.coin === coin);
     const leverage = sourcePosition?.leverage ?? sourceOrder?.leverage ?? targetPosition?.leverage ?? this.leverageCache.get(coin);
-    const markPriceUsd = sourcePosition?.markPriceUsd ?? targetPosition?.markPriceUsd ?? sourceOrder?.price;
+    const markPriceUsd = this.currentMarks.get(normalizeCoin(coin)) ?? sourcePosition?.markPriceUsd ?? targetPosition?.markPriceUsd ?? sourceOrder?.price;
     if (!leverage || !markPriceUsd) throw new Error(`Cannot construct a flat target for ${coin}`);
     return targetFlatPosition({
       coin,
@@ -510,6 +781,53 @@ export class FaithfulPairActor {
     if (current) current.marginUsedUsd = Number(result.marginUsedUsd ?? desired.targetIsolatedMarginUsd);
   }
 
+  #setPositionTrackingDebt(coin, desired, actualSize, delta, reasons) {
+    const debt = {
+      coin,
+      desiredSignedSize: desired.targetSignedSize,
+      actualSignedSize: actualSize,
+      deltaSize: delta.rawDeltaSize,
+      notionalUsd: Math.abs(delta.rawDeltaSize) * desired.markPriceUsd,
+      thresholdNotionalUsd: this.config.immediateResidualNotionalUsd,
+      markPriceUsd: desired.markPriceUsd,
+      reason: "POSITION_BELOW_MINIMUM",
+      causes: [...reasons],
+      at: this.now(),
+    };
+    this.#replaceTrackingDebt(this.positionTrackingDebtByCoin, coin, debt);
+  }
+
+  #setOrderTrackingDebt(sourceOrderId, debt) {
+    this.#replaceTrackingDebt(this.orderTrackingDebtBySource, String(sourceOrderId), debt);
+  }
+
+  #clearOrderTrackingDebt(sourceOrderId, resolution) {
+    this.#clearTrackingDebt(this.orderTrackingDebtBySource, String(sourceOrderId), resolution);
+  }
+
+  #clearPositionTrackingDebt(coin, resolution) {
+    this.#clearTrackingDebt(this.positionTrackingDebtByCoin, normalizeCoin(coin), resolution);
+  }
+
+  #replaceTrackingDebt(collection, key, debt) {
+    const prior = collection.get(key);
+    // Always replace the in-memory state, including its fresh timestamp and
+    // causes, even when its material audit representation has not changed.
+    collection.set(key, debt);
+    if (!prior || !sameTrackingDebt(prior, debt)) this.#record("TRACKING_DEBT", debt);
+  }
+
+  #clearTrackingDebt(collection, key, resolution) {
+    const prior = collection.get(key);
+    if (!prior) return;
+    collection.delete(key);
+    this.#record("TRACKING_DEBT_CLEARED", {
+      ...prior,
+      resolution: String(resolution),
+      clearedAt: this.now(),
+    });
+  }
+
   #scheduleVerification(coin) {
     const generation = (this.generationByCoin.get(coin) ?? 0) + 1;
     this.generationByCoin.set(coin, generation);
@@ -520,27 +838,50 @@ export class FaithfulPairActor {
     const fast = setTimeout(() => {
       this.verificationTimers.delete(coin);
       if (this.generationByCoin.get(coin) !== generation || this.stopped) return;
+      this.stats.verification250ms += 1;
       this.#markDirty(coin, "VERIFY_250MS");
     }, this.config.verificationDelayMs);
     const terminal = setTimeout(async () => {
       this.terminalTimers.delete(coin);
       if (this.generationByCoin.get(coin) !== generation || this.stopped) return;
-      this.#markDirty(coin, "VERIFY_1000MS");
-      await this.whenIdle();
-      const desired = this.#desiredPosition(coin);
-      const actual = positionSizeForCoin(this.targetSnapshot, coin);
-      const residual = residualBps({ desiredSize: desired.targetSignedSize, actualSize: actual });
-      if (residual > this.config.targetPositionToleranceBps) {
-        this.stats.terminalResiduals += 1;
-        await this.execution.onUnresolvedResidual?.({
-          pairId: this.pairId,
-          coin,
-          desiredSignedSize: desired.targetSignedSize,
-          actualSignedSize: actual,
-          residualBps: residual,
-          killSwitchRequested: this.config.killOnTerminalResidual,
+      this.stats.verification1000ms += 1;
+      try {
+        this.#markDirty(coin, "VERIFY_1000MS");
+        await this.whenIdle();
+        if (this.stopped || this.blocked) return;
+        const desired = this.#desiredPosition(coin);
+        const actual = positionSizeForCoin(this.targetSnapshot, coin);
+        const residual = residualBps({ desiredSize: desired.targetSignedSize, actualSize: actual });
+        const terminalDelta = reconciliationDelta({
+          desiredSize: desired.targetSignedSize,
+          actualSize: actual,
+          markPriceUsd: desired.markPriceUsd,
+          minNotionalUsd: this.config.immediateResidualNotionalUsd,
+          sizeStep: desired.sizeStep ?? 0,
         });
-        this.#record("TERMINAL_RESIDUAL", { coin, desiredSize: desired.targetSignedSize, actualSize: actual, residualBps: residual });
+        // A sub-minimum residual is explicit tracking debt, not a terminal
+        // execution failure. Killing the pair here would contradict the
+        // required accumulate-until-tradeable behavior.
+        if (terminalDelta.tradeable && residual > this.config.targetPositionToleranceBps) {
+          this.stats.terminalResiduals += 1;
+          const residualDetail = {
+            pairId: this.pairId,
+            coin,
+            desiredSignedSize: desired.targetSignedSize,
+            actualSignedSize: actual,
+            residualBps: residual,
+            killSwitchRequested: this.config.killOnTerminalResidual,
+          };
+          try {
+            await this.execution.onUnresolvedResidual?.(residualDetail);
+          } catch (hookError) {
+            this.#record("TERMINAL_RESIDUAL_HOOK_ERROR", { coin, message: hookError instanceof Error ? hookError.message : String(hookError) });
+          }
+          this.#record("TERMINAL_RESIDUAL", { coin, desiredSize: desired.targetSignedSize, actualSize: actual, residualBps: residual });
+          if (this.config.killOnTerminalResidual) await this.#killPair(residualDetail);
+        }
+      } catch (error) {
+        await this.#blockPair(error, { coin, phase: "TERMINAL_VERIFICATION" });
       }
     }, this.config.terminalVerificationDelayMs);
     fast.unref?.();
@@ -569,6 +910,7 @@ export class FaithfulPairActor {
   }
 
   #markDirty(coin, reason) {
+    if (this.stopped || this.blocked) return;
     const normalized = normalizeCoin(coin);
     this.dirtyCoins.add(normalized);
     const reasons = this.dirtyReasons.get(normalized) ?? new Set();
@@ -610,10 +952,82 @@ export class FaithfulPairActor {
 
   #requireReady() {
     if (!this.initialized) throw new Error(`Pair ${this.pairId} is not initialized`);
+    if (this.killed) throw new Error(`Pair ${this.pairId} is killed`);
+    if (this.blocked) throw new Error(`Pair ${this.pairId} is recovery-blocked`);
     if (this.stopped) throw new Error(`Pair ${this.pairId} is stopped`);
   }
 
+  #buffer(type, payload) {
+    this.bufferedEvents.push({ type, payload: clone(payload) });
+  }
+
+  #ingestCurrentMarks(currentMarks) {
+    if (!currentMarks) return;
+    const entries = currentMarks instanceof Map
+      ? [...currentMarks.entries()]
+      : Array.isArray(currentMarks)
+        ? currentMarks.map((value) => [value.coin, value.markPriceUsd ?? value.price])
+        : Object.entries(currentMarks);
+    for (const [coin, rawMark] of entries) {
+      const normalizedCoin = normalizeCoin(coin);
+      const mark = Number(rawMark);
+      if (!Number.isFinite(mark) || mark <= 0) throw new Error(`Current mark for ${normalizedCoin} must be positive`);
+      this.currentMarks.set(normalizedCoin, mark);
+    }
+  }
+
+  async #blockPair(error, detail = {}) {
+    if (this.blocked || this.killed) return;
+    this.blocked = true;
+    this.state = "PAIR_RECOVERY_BLOCKED";
+    this.lastError = error instanceof Error ? error.message : String(error);
+    this.stats.pairFailures += 1;
+    this.dirtyCoins.clear();
+    this.dirtyReasons.clear();
+    for (const timer of this.verificationTimers.values()) clearTimeout(timer);
+    for (const timer of this.terminalTimers.values()) clearTimeout(timer);
+    this.verificationTimers.clear();
+    this.terminalTimers.clear();
+    this.#record("PAIR_RECOVERY_BLOCKED", { ...detail, message: this.lastError });
+    try {
+      await this.execution.onPairFailure?.({
+        pairId: this.pairId,
+        sourceAddress: this.sourceAddress,
+        targetAddress: this.targetAddress,
+        error: this.lastError,
+        ...clone(detail),
+      });
+    } catch (hookError) {
+      this.#record("PAIR_FAILURE_HOOK_ERROR", { message: hookError instanceof Error ? hookError.message : String(hookError) });
+    }
+  }
+
+  async #killPair(detail = {}) {
+    if (this.killed) return;
+    this.killed = true;
+    this.stopped = true;
+    this.state = "KILLED";
+    this.dirtyCoins.clear();
+    this.dirtyReasons.clear();
+    for (const timer of this.verificationTimers.values()) clearTimeout(timer);
+    for (const timer of this.terminalTimers.values()) clearTimeout(timer);
+    this.verificationTimers.clear();
+    this.terminalTimers.clear();
+    this.#record("PAIR_KILLED", clone(detail));
+    try {
+      await this.execution.killPair?.({
+        pairId: this.pairId,
+        sourceAddress: this.sourceAddress,
+        targetAddress: this.targetAddress,
+        ...clone(detail),
+      });
+    } catch (hookError) {
+      this.#record("PAIR_KILL_HOOK_ERROR", { message: hookError instanceof Error ? hookError.message : String(hookError) });
+    }
+  }
+
   #record(type, detail) {
-    this.log({ type, at: this.now(), detail: clone(detail) });
+    const at = this.now();
+    this.log({ type, at, receivedAt: at, detail: clone(detail) });
   }
 }

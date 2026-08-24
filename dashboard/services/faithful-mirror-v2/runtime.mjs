@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { FiveWhaleFaithfulMirrorEngine } from "./engine.mjs";
-import { normalizeAddress, normalizeCoin } from "./domain.mjs";
+import { canonicalTargetCloid, normalizeAddress, normalizeCoin } from "./domain.mjs";
 
 const MAINNET_INFO = "https://api.hyperliquid.xyz/info";
 const TESTNET_INFO = "https://api.hyperliquid-testnet.xyz/info";
@@ -13,11 +13,101 @@ const asNumber = (value) => {
 };
 const valueAt = (value, key, fallback = null) => record(value)?.[key] ?? fallback;
 const orderStatusOpen = (status) => ["open", "resting", "partial", "triggered", "pending"].includes(String(status ?? "open").toLowerCase());
+const DEFAULT_FILL_DEDUP_MAX = 100_000;
+const DEFAULT_FILL_DEDUP_AGE_MS = 6 * 60 * 60 * 1_000;
+const DEFAULT_LEVERAGE_CACHE_TTL_MS = 5 * 60 * 1_000;
+
+export const normalizeSide = (value) => {
+  const side = String(value ?? "").trim().toUpperCase();
+  if (side === "B" || side === "BUY") return "BUY";
+  if (side === "A" || side === "SELL") return "SELL";
+  return null;
+};
+
+/**
+ * Bounded insertion-order fill deduplication.  It deliberately never clears
+ * the whole window: doing so can replay an entire reconnect overlap.
+ */
+export class BoundedFillDeduper {
+  constructor({ maxEntries = DEFAULT_FILL_DEDUP_MAX, maxAgeMs = DEFAULT_FILL_DEDUP_AGE_MS, now = Date.now } = {}) {
+    if (!Number.isInteger(maxEntries) || maxEntries < 1) throw new Error("maxEntries must be a positive integer");
+    if (!(Number(maxAgeMs) >= 0)) throw new Error("maxAgeMs must be non-negative");
+    this.maxEntries = maxEntries;
+    this.maxAgeMs = Number(maxAgeMs);
+    this.now = now;
+    this.entries = new Map();
+  }
+
+  has(key, at = this.now()) {
+    this.#evict(at);
+    return this.entries.has(String(key));
+  }
+
+  add(key, at = this.now()) {
+    const normalized = String(key);
+    this.#evict(at);
+    if (this.entries.has(normalized)) this.entries.delete(normalized);
+    this.entries.set(normalized, Number(at));
+    while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value);
+  }
+
+  get size() { return this.entries.size; }
+
+  snapshot({ limit = this.maxEntries, at = this.now() } = {}) {
+    this.#evict(at);
+    const safeLimit = Math.max(0, Math.min(this.maxEntries, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : this.maxEntries));
+    if (safeLimit === 0) return [];
+    return [...this.entries.entries()].slice(-safeLimit).map(([id, seenAt]) => ({ id, seenAt }));
+  }
+
+  #evict(at) {
+    if (this.maxAgeMs <= 0) return;
+    const cutoff = Number(at) - this.maxAgeMs;
+    for (const [key, seenAt] of this.entries) {
+      if (seenAt < cutoff) this.entries.delete(key);
+    }
+  }
+}
+
+/** Coalesces/limits source activeAssetData reads; source order events never own a REST hot path. */
+export class ActiveLeverageCache {
+  constructor({ ttlMs = DEFAULT_LEVERAGE_CACHE_TTL_MS, now = Date.now } = {}) {
+    this.ttlMs = Number(ttlMs);
+    this.now = now;
+    this.entries = new Map();
+  }
+
+  seed(coin, leverage) {
+    const parsed = parseLeverage(leverage);
+    if (parsed) this.entries.set(normalizeCoin(coin), { value: parsed, expiresAt: this.now() + this.ttlMs, promise: null });
+    return parsed;
+  }
+
+  async resolve(coin, loader) {
+    const normalized = normalizeCoin(coin);
+    const current = this.entries.get(normalized);
+    if (current?.value && current.expiresAt >= this.now()) return current.value;
+    if (current?.promise) return current.promise;
+    const promise = Promise.resolve().then(loader).then((value) => {
+      const parsed = parseLeverage(value);
+      if (!parsed) throw new Error(`Hyperliquid did not return leverage for ${normalized}`);
+      this.entries.set(normalized, { value: parsed, expiresAt: this.now() + this.ttlMs, promise: null });
+      return parsed;
+    }).catch((error) => {
+      if (this.entries.get(normalized)?.promise === promise) this.entries.delete(normalized);
+      throw error;
+    });
+    this.entries.set(normalized, { value: current?.value ?? null, expiresAt: 0, promise });
+    return promise;
+  }
+}
 
 export const normalizeAccountMode = (value) => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized || ["disabled", "standard", "standardaccount"].includes(normalized)) return "STANDARD";
-  if (["unified", "unifiedaccount", "unifiedmargin"].includes(normalized)) return "UNIFIED";
+  const raw = record(value);
+  const candidate = raw?.accountMode ?? raw?.mode ?? raw?.abstraction ?? raw?.type ?? value;
+  const normalized = String(candidate ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!normalized || ["disabled", "standard", "standardaccount", "standard_account"].includes(normalized)) return "STANDARD";
+  if (["unified", "unifiedaccount", "unifiedmargin", "unified_account", "unified_margin"].includes(normalized)) return "UNIFIED";
   if (["portfolio", "portfoliomargin", "portfolio_margin"].includes(normalized)) return "PORTFOLIO_MARGIN";
   throw new Error(`Unsupported Hyperliquid account mode: ${value}`);
 };
@@ -37,6 +127,21 @@ const clearinghouseEntries = (payload) => {
   return record(states) ? Object.entries(states) : [];
 };
 
+export const dexesFromAllDexsState = (payload) => {
+  const dexes = new Set();
+  for (const [dex] of clearinghouseEntries(payload)) {
+    const normalized = String(dex ?? "").trim();
+    if (normalized && !["main", "default", "perp"].includes(normalized.toLowerCase())) dexes.add(normalized);
+  }
+  const raw = record(payload);
+  const candidates = Array.isArray(raw?.perpDexs) ? raw.perpDexs : Array.isArray(raw?.dexes) ? raw.dexes : [];
+  for (const candidate of candidates) {
+    const name = typeof candidate === "string" ? candidate : record(candidate)?.name ?? record(candidate)?.dex;
+    if (typeof name === "string" && name.trim() && !["main", "default", "perp"].includes(name.trim().toLowerCase())) dexes.add(name.trim());
+  }
+  return [...dexes].sort((left, right) => left.localeCompare(right));
+};
+
 export const parseAllDexsAccountSnapshot = ({ payload, accountMode = "STANDARD", portfolioEquityUsd = null, at = Date.now() }) => {
   const mode = normalizeAccountMode(accountMode);
   if (mode === "PORTFOLIO_MARGIN") throw new Error("Portfolio Margin is not supported by Faithful Mirror V2");
@@ -44,12 +149,15 @@ export const parseAllDexsAccountSnapshot = ({ payload, accountMode = "STANDARD",
   const positions = [];
   let summedEquityUsd = 0;
   for (const [dex, stateValue] of clearinghouseEntries(payload)) {
+    const rawDex = String(dex ?? "").trim();
+    const isMainDex = !rawDex || ["main", "default", "perp"].includes(rawDex.toLowerCase());
+    const dexLabel = isMainDex ? "main" : rawDex;
     const state = record(stateValue);
     const marginSummary = record(state?.marginSummary);
     const crossSummary = record(state?.crossMarginSummary);
     const accountValue = asNumber(marginSummary?.accountValue);
     if (accountValue == null) continue;
-    const poolId = mode === "UNIFIED" ? "unified" : dex || "main";
+    const poolId = mode === "UNIFIED" ? "unified" : dexLabel;
     const pool = marginPools[poolId] ?? {
       equityUsd: 0,
       crossEquityUsd: 0,
@@ -63,7 +171,7 @@ export const parseAllDexsAccountSnapshot = ({ payload, accountMode = "STANDARD",
     pool.marginUsedUsd += asNumber(marginSummary?.totalMarginUsed) ?? 0;
     pool.maintenanceMarginUsedUsd += asNumber(state?.crossMaintenanceMarginUsed) ?? 0;
     pool.withdrawableUsd += asNumber(state?.withdrawable) ?? 0;
-    pool.dexes.push(dex || "main");
+    pool.dexes.push(dexLabel);
     marginPools[poolId] = pool;
     summedEquityUsd += accountValue;
     for (const item of Array.isArray(state?.assetPositions) ? state.assetPositions : []) {
@@ -71,11 +179,13 @@ export const parseAllDexsAccountSnapshot = ({ payload, accountMode = "STANDARD",
       if (!position) continue;
       const signedSize = asNumber(position.szi);
       if (typeof position.coin !== "string" || signedSize == null) continue;
-      const coin = dex && !position.coin.includes(":") ? `${dex}:${position.coin}` : position.coin;
+      const coin = !isMainDex && !position.coin.includes(":") ? `${dexLabel}:${position.coin}` : position.coin;
       const positionValueUsd = asNumber(position.positionValue);
       const markPriceUsd = positionValueUsd != null && Math.abs(signedSize) > 1e-12 ? Math.abs(positionValueUsd / signedSize) : null;
       const leverage = parseLeverage(position.leverage);
       if (!leverage) throw new Error(`Source leverage is unavailable for ${coin}`);
+      const marginUsedUsd = asNumber(position.marginUsed);
+      if (leverage.type === "isolated" && !(marginUsedUsd > 0)) throw new Error(`Isolated marginUsed is unavailable for ${coin}`);
       positions.push({
         coin: normalizeCoin(coin),
         poolId,
@@ -83,7 +193,7 @@ export const parseAllDexsAccountSnapshot = ({ payload, accountMode = "STANDARD",
         ...(positionValueUsd != null ? { positionValueUsd: Math.abs(positionValueUsd) } : {}),
         ...(markPriceUsd != null ? { markPriceUsd } : {}),
         ...(asNumber(position.entryPx) != null ? { entryPriceUsd: asNumber(position.entryPx) } : {}),
-        ...(asNumber(position.marginUsed) != null ? { marginUsedUsd: asNumber(position.marginUsed) } : {}),
+        ...(marginUsedUsd != null ? { marginUsedUsd } : {}),
         ...(asNumber(position.liquidationPx) != null ? { liquidationPriceUsd: asNumber(position.liquidationPx) } : {}),
         leverage,
       });
@@ -99,7 +209,8 @@ export const parseAllDexsAccountSnapshot = ({ payload, accountMode = "STANDARD",
 
 export const parseUserFill = (value) => {
   const raw = record(value);
-  if (!raw || typeof raw.coin !== "string" || !["B", "A"].includes(String(raw.side).toUpperCase())) return null;
+  const side = normalizeSide(raw?.side);
+  if (!raw || typeof raw.coin !== "string" || !side) return null;
   const size = asNumber(raw.sz);
   const price = asNumber(raw.px);
   const startPosition = asNumber(raw.startPosition);
@@ -107,7 +218,7 @@ export const parseUserFill = (value) => {
   if (!(size > 0) || !(price > 0) || startPosition == null || time == null) return null;
   return {
     coin: normalizeCoin(raw.coin),
-    side: String(raw.side).toUpperCase(),
+    side,
     size,
     price,
     startPosition,
@@ -123,16 +234,22 @@ export const fillId = (address, fill) => [normalizeAddress(address), fill.coin, 
 export const parseOrder = (value, status = "OPEN") => {
   const raw = record(value);
   if (!raw || typeof raw.coin !== "string" || raw.oid == null) return null;
-  const side = String(raw.side ?? "").toUpperCase();
-  if (side !== "B" && side !== "A" && side !== "BUY" && side !== "SELL") return null;
+  const side = normalizeSide(raw.side);
+  if (!side) return null;
+  const dex = String(raw.dex ?? raw.perpDex ?? (String(raw.coin).includes(":") ? String(raw.coin).split(":", 1)[0] : "main")).trim() || "main";
+  const rawCoin = dex.toLowerCase() !== "main" && !String(raw.coin).includes(":") ? `${dex}:${raw.coin}` : raw.coin;
   const price = asNumber(raw.limitPx ?? raw.price);
   const remainingSize = asNumber(raw.sz ?? raw.remainingSize);
   const size = asNumber(raw.origSz ?? raw.size ?? remainingSize);
   if (!(price > 0) || remainingSize == null || size == null) return null;
-  const triggerPrice = asNumber(raw.triggerPx ?? raw.triggerPrice);
+  const rawTriggerPrice = asNumber(raw.triggerPx ?? raw.triggerPrice);
+  // Hyperliquid serializes non-trigger orders with triggerPx = "0.0".
+  // Zero means absent; it is not a valid trigger price.
+  const triggerPrice = rawTriggerPrice != null && rawTriggerPrice > 0 ? rawTriggerPrice : null;
   return {
     id: String(raw.oid),
-    coin: normalizeCoin(raw.coin),
+    coin: normalizeCoin(rawCoin),
+    dex,
     side,
     price,
     triggerPrice,
@@ -171,6 +288,7 @@ export class HyperliquidInfoClient {
     this.url = testnet ? TESTNET_INFO : MAINNET_INFO;
     this.fetchImpl = fetchImpl;
     this.retries = retries;
+    this.perpDexNamesPromise = null;
   }
 
   async post(body) {
@@ -197,16 +315,62 @@ export class HyperliquidInfoClient {
     return normalizeAccountMode(await this.post({ type: "userAbstraction", user: normalizeAddress(user) }));
   }
 
-  async allDexsState(user) {
-    return this.post({ type: "allDexsClearinghouseState", user: normalizeAddress(user) });
+  async perpDexNames() {
+    if (!this.perpDexNamesPromise) {
+      this.perpDexNamesPromise = this.post({ type: "perpDexs" }).then((payload) => {
+        if (!Array.isArray(payload)) throw new Error("Hyperliquid perpDexs response is not an array");
+        return payload.flatMap((item) => {
+          const name = record(item)?.name;
+          return typeof name === "string" && name.trim() ? [name.trim()] : [];
+        });
+      }).catch((error) => {
+        this.perpDexNamesPromise = null;
+        throw error;
+      });
+    }
+    return this.perpDexNamesPromise;
   }
 
-  async openOrders(user) {
-    const payload = await this.post({ type: "frontendOpenOrders", user: normalizeAddress(user) });
-    return Array.isArray(payload) ? payload.flatMap((item) => {
-      const parsed = parseOrder(item, "OPEN");
-      return parsed ? [parsed] : [];
-    }) : [];
+  async allDexsState(user) {
+    // `allDexsClearinghouseState` is a WebSocket subscription name, not a
+    // supported REST info request. REST bootstrap must enumerate perpDexs and
+    // query clearinghouseState once per DEX.
+    const address = normalizeAddress(user);
+    const dexNames = await this.perpDexNames();
+    const dexes = [["main", ""], ...dexNames.map((name) => [name, name])];
+    const states = await Promise.all(dexes.map(async ([label, dex]) => [
+      label,
+      await this.post({ type: "clearinghouseState", user: address, dex }),
+    ]));
+    return { clearinghouseStates: states };
+  }
+
+  async openOrders(user, { allDexsState = null } = {}) {
+    const address = normalizeAddress(user);
+    const state = allDexsState ?? await this.allDexsState(address);
+    const dexes = dexesFromAllDexsState(state);
+    const requests = [null, ...dexes];
+    const responses = await Promise.all(requests.map(async (dex) => ({
+      dex: dex ?? "main",
+      // Hyperliquid requires the dex field even for the default perp DEX.
+      // An omitted field receives HTTP 422, while the canonical main-Dex
+      // representation is the empty string.
+      payload: await this.post({ type: "frontendOpenOrders", user: address, dex: dex ?? "" }),
+    })));
+    const seen = new Set();
+    const orders = [];
+    for (const { dex, payload } of responses) {
+      if (!Array.isArray(payload)) continue;
+      for (const item of payload) {
+        const parsed = parseOrder({ ...record(item), dex: record(item)?.dex ?? dex }, "OPEN");
+        if (!parsed) continue;
+        const key = [address, parsed.dex, parsed.id].join("|");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        orders.push(parsed);
+      }
+    }
+    return orders;
   }
 
   async activeLeverage(user, coin) {
@@ -257,7 +421,7 @@ export class HyperliquidInfoClient {
         maximumTime = Math.max(maximumTime, fill.time);
       }
       if (payload.length < 2_000) break;
-      if (maximumTime < cursor) throw new Error("Hyperliquid fill pagination cursor regressed");
+      if (maximumTime <= cursor) throw new Error("Hyperliquid fill pagination cursor stalled");
       cursor = maximumTime;
       loops += 1;
     }
@@ -408,14 +572,14 @@ export class UserSocket {
 }
 
 export const createLiveMirrorSystem = ({ pairs, executionFactory, actorConfig = {}, log = () => {} }) => {
-  if (pairs.length !== 5) throw new Error("Live faithful mirror requires exactly five source-target pairs to match the 10-user WebSocket topology");
+  if (!Array.isArray(pairs) || pairs.length < 1 || pairs.length > 5) throw new Error("Live faithful mirror requires 1-5 source-target pairs");
   const engine = new FiveWhaleFaithfulMirrorEngine({ pairs, executionFactory, actorConfig, log });
   return { engine };
 };
 
 export class HyperliquidMirrorRuntime {
   constructor({ engine, pairs, testnet = false, infoClient = null, WebSocketImpl = WebSocket, heartbeatMs = 20_000, staleConnectionMs = 50_000, reconnectMaxMs = 30_000, allowApproxUnified = false, log = () => {} }) {
-    if (!Array.isArray(pairs) || pairs.length !== 5) throw new Error("Hyperliquid live runtime requires exactly five pairs");
+    if (!Array.isArray(pairs) || pairs.length < 1 || pairs.length > 5) throw new Error("Hyperliquid live runtime requires 1-5 pairs");
     this.engine = engine;
     this.pairs = pairs.map((pair) => ({ ...pair, sourceAddress: normalizeAddress(pair.sourceAddress), targetAddress: normalizeAddress(pair.targetAddress) }));
     this.testnet = testnet;
@@ -428,8 +592,9 @@ export class HyperliquidMirrorRuntime {
     this.log = log;
     this.sockets = [];
     this.contextByAddress = new Map();
-    this.seenFillIds = new Set();
+    this.seenFillIds = new BoundedFillDeduper();
     this.eventSequence = 0;
+    this.recoveryByPair = new Map();
   }
 
   async start() {
@@ -453,7 +618,13 @@ export class HyperliquidMirrorRuntime {
         buffer: [],
         sourceLastFillTime: null,
         targetLastFillTime: null,
+        sourceLeverage: new ActiveLeverageCache(),
+        targetLeverage: new ActiveLeverageCache(),
+        sourceFillSnapshotSeen: false,
+        targetFillSnapshotSeen: false,
+        recoveredOrderOwnership: new Map(),
       };
+      this.#applyRecovery(context, this.recoveryByPair.get(context.pairId));
       contexts.push(context);
       this.contextByAddress.set(pair.sourceAddress, { context, role: "source" });
       this.contextByAddress.set(pair.targetAddress, { context, role: "target" });
@@ -472,6 +643,84 @@ export class HyperliquidMirrorRuntime {
   stop() {
     for (const socket of this.sockets) socket.stop();
     this.engine.stop();
+  }
+
+  restoreRecoveryCheckpoint(checkpoint) {
+    const candidates = Array.isArray(checkpoint?.pairs)
+      ? checkpoint.pairs
+      : Object.values(checkpoint?.pairs ?? checkpoint?.contexts ?? {});
+    for (const value of candidates) {
+      this.#validateRecoveryCheckpoint(value);
+      this.recoveryByPair.set(String(value.pairId), structuredClone(value));
+    }
+    for (const { context } of this.contextByAddress.values()) this.#applyRecovery(context, this.recoveryByPair.get(context.pairId));
+    return { accepted: true, restoredPairs: this.recoveryByPair.size };
+  }
+
+  #validateRecoveryCheckpoint(checkpoint) {
+    const value = record(checkpoint);
+    if (!value?.pairId) throw new Error("Recovery checkpoint pairId is required");
+    const pair = this.pairs.find((candidate) => candidate.pairId === String(value.pairId));
+    if (!pair) throw new Error(`Recovery checkpoint references unknown pair ${value.pairId}`);
+    if (value.sourceAddress && normalizeAddress(value.sourceAddress) !== pair.sourceAddress) throw new Error(`Recovery source mismatch for ${pair.pairId}`);
+    if (value.targetAddress && normalizeAddress(value.targetAddress) !== pair.targetAddress) throw new Error(`Recovery target mismatch for ${pair.pairId}`);
+    this.#parseRecoveredOrderOwnership(pair.pairId, value.sourceOrderToTargetCloid);
+  }
+
+  #parseRecoveredOrderOwnership(pairId, rawMappings) {
+    if (rawMappings == null) return new Map();
+    const mappings = record(rawMappings);
+    if (!mappings) throw new Error(`Recovery order mapping must be an object for ${pairId}`);
+    const ownership = new Map();
+    for (const [rawSourceOrderId, rawTargetCloid] of Object.entries(mappings)) {
+      const sourceOrderId = String(rawSourceOrderId);
+      const targetCloid = String(rawTargetCloid);
+      if (!sourceOrderId || !targetCloid || sourceOrderId.trim() !== sourceOrderId || targetCloid !== canonicalTargetCloid(pairId, sourceOrderId)) {
+        throw new Error(`Recovery target Cloid is non-canonical for ${pairId}/${sourceOrderId || "<missing>"}`);
+      }
+      ownership.set(sourceOrderId, targetCloid);
+    }
+    return ownership;
+  }
+
+  recoveryCheckpoint() {
+    const enginePairs = this.engine?.snapshot?.()?.pairs ?? {};
+    const contexts = [...new Map([...this.contextByAddress.values()].map(({ context }) => [context.pairId, context])).values()];
+    return {
+      schemaVersion: 1,
+      generatedAt: Date.now(),
+      pairs: contexts.map((context) => this.#recoveryPair(context, enginePairs[context.pairId])),
+    };
+  }
+
+  async reconcile() {
+    const contexts = [...new Map([...this.contextByAddress.values()].map(({ context }) => [context.pairId, context])).values()];
+    for (const context of contexts) {
+      if (this.#isTerminalContext(context)) continue;
+      for (const role of ["source", "target"]) {
+        const address = role === "source" ? context.sourceAddress : context.targetAddress;
+        const state = await this.info.allDexsState(address);
+        await this.#acceptSnapshot(context, role, state);
+        const orders = await this.info.openOrders(address, { allDexsState: state });
+        if (role === "source") {
+          context.sourceOrders = orders;
+          if (context.bootstrapped) await this.engine.syncSourceOrders(address, orders);
+        } else {
+          context.targetOrders = orders;
+          if (context.bootstrapped) this.engine.syncTargetOrders(address, orders);
+        }
+      }
+      await this.#tryBootstrap(context);
+    }
+    await this.engine.whenIdle();
+    return { accepted: true, pairCount: contexts.length };
+  }
+
+  #isTerminalContext(context) {
+    if (!context) return true;
+    if (typeof this.engine.isPairTerminal === "function") return this.engine.isPairTerminal(context.pairId);
+    const actor = this.engine?.snapshot?.()?.pairs?.[context.pairId];
+    return actor?.killed === true || actor?.blocked === true || actor?.stopped === true;
   }
 
   #makeSocket(context, role) {
@@ -496,8 +745,14 @@ export class HyperliquidMirrorRuntime {
   }
 
   async #onOpen(context, role) {
+    if (this.#isTerminalContext(context)) return { ignored: true, reason: "PAIR_TERMINAL" };
     const address = role === "source" ? context.sourceAddress : context.targetAddress;
-    const orders = await this.info.openOrders(address);
+    // The REST bootstrap is intentionally outside the order-event hot path. It
+    // supplies both every DEX name and an authoritative state before an open
+    // order snapshot is trusted.
+    const allDexsState = await this.info.allDexsState(address);
+    await this.#acceptSnapshot(context, role, allDexsState);
+    const orders = await this.info.openOrders(address, { allDexsState });
     if (role === "source") context.sourceOrders = orders;
     else {
       context.targetOrders = orders;
@@ -506,40 +761,34 @@ export class HyperliquidMirrorRuntime {
     const lastFillTime = role === "source" ? context.sourceLastFillTime : context.targetLastFillTime;
     if (lastFillTime != null) {
       const fills = await this.info.fillsSince(address, Math.max(0, lastFillTime - 1_000));
-      for (const fill of fills) this.#handleFill(context, role, fill, true);
+      for (const fill of fills) await this.#handleFill(context, role, fill, true);
       if (context.bootstrapped && role === "source") await this.engine.syncSourceOrders(context.sourceAddress, orders);
     }
     await this.#tryBootstrap(context);
   }
 
   async #onMessage(context, role, message, error) {
+    if (this.#isTerminalContext(context)) return;
     if (error) {
       this.log({ type: "RUNTIME_ERROR", pairId: context.pairId, role, message: error instanceof Error ? error.message : String(error), at: Date.now() });
       return;
     }
     if (message?.channel === "allDexsClearinghouseState") {
-      const portfolioEquityUsd = context.accountMode === "UNIFIED"
-        ? await this.info.portfolioEquity(role === "source" ? context.sourceAddress : context.targetAddress)
-        : null;
-      const snapshot = parseAllDexsAccountSnapshot({ payload: message.data, accountMode: context.accountMode, portfolioEquityUsd });
-      if (role === "source") {
-        context.sourceSnapshot = snapshot;
-        if (context.bootstrapped) this.engine.onSourceSnapshot(context.sourceAddress, snapshot);
-      } else {
-        context.targetSnapshot = snapshot;
-        if (context.bootstrapped) this.engine.onTargetSnapshot(context.targetAddress, snapshot);
-      }
+      await this.#acceptSnapshot(context, role, message.data);
       await this.#tryBootstrap(context);
       return;
     }
     if (message?.channel === "userFills") {
       const data = record(message.data);
       const isSnapshot = data?.isSnapshot === true;
-      const last = role === "source" ? context.sourceLastFillTime : context.targetLastFillTime;
-      if (isSnapshot && last == null) return;
+      const snapshotFlag = role === "source" ? "sourceFillSnapshotSeen" : "targetFillSnapshotSeen";
+      if (isSnapshot && !context[snapshotFlag]) {
+        context[snapshotFlag] = true;
+        return;
+      }
       for (const raw of Array.isArray(data?.fills) ? data.fills : []) {
         const fill = parseUserFill(raw);
-        if (fill) this.#handleFill(context, role, fill, false);
+        if (fill) await this.#handleFill(context, role, fill, false);
       }
       return;
     }
@@ -549,12 +798,12 @@ export class HyperliquidMirrorRuntime {
         const update = parseOrderUpdate(raw);
         if (!update) continue;
         if (role === "source") {
-          update.order.leverage = await this.info.activeLeverage(context.sourceAddress, update.order.coin);
+          update.order.leverage = await context.sourceLeverage.resolve(update.order.coin, () => this.info.activeLeverage(context.sourceAddress, update.order.coin));
           update.order.poolId = context.accountMode === "UNIFIED" ? "unified" : update.order.coin.includes(":") ? update.order.coin.split(":", 1)[0] : "main";
           if (context.bootstrapped) await this.engine.onSourceOrder(context.sourceAddress, update);
           else context.buffer.push({ type: "sourceOrder", update, sequence: ++this.eventSequence });
         } else {
-          this.engine.onTargetOrder(context.targetAddress, {
+          const targetUpdate = {
             targetOrderId: update.order.clientOrderId,
             exchangeOrderId: update.order.id,
             coin: update.order.coin,
@@ -562,34 +811,53 @@ export class HyperliquidMirrorRuntime {
             remainingSize: update.order.remainingSize,
             filledSize: Math.max(0, update.order.size - update.order.remainingSize),
             order: update.order,
-          });
+          };
+          if (context.bootstrapped) this.engine.onTargetOrder(context.targetAddress, targetUpdate);
+          else context.buffer.push({ type: "targetOrder", update: targetUpdate, sequence: ++this.eventSequence });
         }
       }
     }
   }
 
-  #handleFill(context, role, fill, backfill) {
+  async #handleFill(context, role, fill, backfill) {
+    if (this.#isTerminalContext(context)) return { ignored: true, reason: "PAIR_TERMINAL" };
     const address = role === "source" ? context.sourceAddress : context.targetAddress;
     const key = fillId(address, fill);
-    if (this.seenFillIds.has(key)) return;
-    this.seenFillIds.add(key);
-    if (this.seenFillIds.size > 100_000) this.seenFillIds.clear();
+    if (this.seenFillIds.has(key, fill.time)) return;
+    this.seenFillIds.add(key, fill.time);
     if (role === "source") context.sourceLastFillTime = Math.max(context.sourceLastFillTime ?? 0, fill.time);
     else context.targetLastFillTime = Math.max(context.targetLastFillTime ?? 0, fill.time);
     const snapshot = role === "source" ? context.sourceSnapshot : context.targetSnapshot;
     const existing = snapshot?.positions?.find((position) => position.coin === fill.coin);
-    fill.leverage = existing?.leverage;
+    if (role === "source") {
+      fill.leverage = existing?.leverage ?? await context.sourceLeverage.resolve(fill.coin, () => this.info.activeLeverage(context.sourceAddress, fill.coin));
+    } else fill.leverage = existing?.leverage;
     fill.marginUsedUsd = existing?.marginUsedUsd;
     fill.poolId = existing?.poolId ?? (context.accountMode === "UNIFIED" ? "unified" : fill.coin.includes(":") ? fill.coin.split(":", 1)[0] : "main");
     if (role === "source") {
       if (context.bootstrapped) this.engine.onSourceFill(context.sourceAddress, fill);
       else context.buffer.push({ type: "sourceFill", fill, sequence: ++this.eventSequence });
-    } else if (context.bootstrapped) this.engine.onTargetFill(context.targetAddress, fill);
+    } else if (context.bootstrapped) {
+      this.engine.onTargetFill(context.targetAddress, fill);
+      this.engine.executionByPair?.get?.(context.pairId)?.onTargetFill?.({ pairId: context.pairId, fill: structuredClone(fill) });
+    }
+    else context.buffer.push({ type: "targetFill", fill, sequence: ++this.eventSequence });
     this.log({ type: backfill ? "BACKFILL_FILL" : "REALTIME_FILL", pairId: context.pairId, role, coin: fill.coin, at: Date.now() });
   }
 
   async #tryBootstrap(context) {
+    if (this.#isTerminalContext(context)) return;
     if (context.bootstrapped || !context.sourceSnapshot || !context.targetSnapshot || !context.sourceOrders || !context.targetOrders) return;
+    if (context.recoveredOrderOwnership.size) {
+      if (typeof this.engine.restoreOrderOwnership !== "function") throw new Error(`Engine does not support fail-closed order ownership recovery for ${context.pairId}`);
+      this.engine.restoreOrderOwnership(context.pairId, {
+        sourceOrderToTargetCloid: Object.fromEntries(context.recoveredOrderOwnership),
+        targetOpenOrders: context.targetOrders,
+        requireTargetOpen: true,
+        preserveExistingShadow: true,
+      });
+      context.recoveredOrderOwnership.clear();
+    }
     await this.engine.bootstrapPair(context.pairId, {
       sourceSnapshot: context.sourceSnapshot,
       targetSnapshot: context.targetSnapshot,
@@ -599,9 +867,80 @@ export class HyperliquidMirrorRuntime {
     this.engine.syncTargetOrders(context.targetAddress, context.targetOrders);
     for (const event of context.buffer.splice(0).sort((left, right) => left.sequence - right.sequence)) {
       if (event.type === "sourceFill") this.engine.onSourceFill(context.sourceAddress, event.fill);
-      else await this.engine.onSourceOrder(context.sourceAddress, event.update);
+      else if (event.type === "sourceOrder") await this.engine.onSourceOrder(context.sourceAddress, event.update);
+      else if (event.type === "targetFill") {
+        this.engine.onTargetFill(context.targetAddress, event.fill);
+        this.engine.executionByPair?.get?.(context.pairId)?.onTargetFill?.({ pairId: context.pairId, fill: structuredClone(event.fill) });
+      }
+      else if (event.type === "targetOrder") this.engine.onTargetOrder(context.targetAddress, event.update);
     }
     await this.engine.whenIdle();
     this.log({ type: "PAIR_BOOTSTRAPPED", pairId: context.pairId, accountMode: context.accountMode, at: Date.now() });
+  }
+
+  async #acceptSnapshot(context, role, payload) {
+    if (this.#isTerminalContext(context)) return;
+    const address = role === "source" ? context.sourceAddress : context.targetAddress;
+    const portfolioEquityUsd = context.accountMode === "UNIFIED"
+      ? await this.info.portfolioEquity(address)
+      : null;
+    const snapshot = parseAllDexsAccountSnapshot({ payload, accountMode: context.accountMode, portfolioEquityUsd });
+    const leverageCache = role === "source" ? context.sourceLeverage : context.targetLeverage;
+    for (const position of snapshot.positions) leverageCache.seed(position.coin, position.leverage);
+    if (role === "source") {
+      context.sourceSnapshot = snapshot;
+      if (context.bootstrapped) this.engine.onSourceSnapshot(context.sourceAddress, snapshot);
+    } else {
+      // A target state is authoritative over prior target fill/local optimistic
+      // state; the actor receives it immediately after parsing.
+      context.targetSnapshot = snapshot;
+      this.engine.executionByPair?.get?.(context.pairId)?.onTargetSnapshot?.(structuredClone(snapshot));
+      if (context.bootstrapped) this.engine.onTargetSnapshot(context.targetAddress, snapshot);
+    }
+  }
+
+  #applyRecovery(context, checkpoint) {
+    if (!checkpoint) return;
+    if (checkpoint.sourceAddress && normalizeAddress(checkpoint.sourceAddress) !== context.sourceAddress) throw new Error(`Recovery source mismatch for ${context.pairId}`);
+    if (checkpoint.targetAddress && normalizeAddress(checkpoint.targetAddress) !== context.targetAddress) throw new Error(`Recovery target mismatch for ${context.pairId}`);
+    const recoveredMode = String(checkpoint.accountMode ?? "").trim().toUpperCase();
+    if (recoveredMode && recoveredMode !== "UNKNOWN" && normalizeAccountMode(recoveredMode) !== context.accountMode) throw new Error(`Recovery account mode changed for ${context.pairId}`);
+    context.sourceLastFillTime = Number.isFinite(Number(checkpoint.lastSourceFillTime)) ? Number(checkpoint.lastSourceFillTime) : context.sourceLastFillTime;
+    context.targetLastFillTime = Number.isFinite(Number(checkpoint.lastTargetFillTime)) ? Number(checkpoint.lastTargetFillTime) : context.targetLastFillTime;
+    for (const key of checkpoint.recentSourceFillIds ?? []) this.seenFillIds.add(key, context.sourceLastFillTime ?? Date.now());
+    for (const key of checkpoint.recentTargetFillIds ?? []) this.seenFillIds.add(key, context.targetLastFillTime ?? Date.now());
+    context.recoveredOrderOwnership = this.#parseRecoveredOrderOwnership(context.pairId, checkpoint.sourceOrderToTargetCloid);
+  }
+
+  #recoveryPair(context, actor) {
+    const ids = this.seenFillIds.snapshot();
+    const sourcePrefix = `${context.sourceAddress}|`;
+    const targetPrefix = `${context.targetAddress}|`;
+    const targetOrders = Array.isArray(actor?.targetOrderState) ? actor.targetOrderState : [];
+    const sourceOrderToTargetCloid = Object.fromEntries(targetOrders.flatMap((order) => {
+      const sourceOrderId = order?.sourceOrderId;
+      const targetOrderId = order?.targetOrderId ?? order?.clientOrderId;
+      if (sourceOrderId == null || targetOrderId == null) return [];
+      const normalizedSourceOrderId = String(sourceOrderId);
+      const normalizedTargetCloid = String(targetOrderId);
+      if (canonicalTargetCloid(context.pairId, normalizedSourceOrderId) !== normalizedTargetCloid) {
+        throw new Error(`Engine emitted a non-canonical target Cloid for ${context.pairId}/${normalizedSourceOrderId}`);
+      }
+      return [[normalizedSourceOrderId, normalizedTargetCloid]];
+    }));
+    return {
+      pairId: context.pairId,
+      sourceAddress: context.sourceAddress,
+      targetAddress: context.targetAddress,
+      lastSourceFillTime: context.sourceLastFillTime,
+      lastTargetFillTime: context.targetLastFillTime,
+      recentSourceFillIds: ids.filter((entry) => entry.id.startsWith(sourcePrefix)).map((entry) => entry.id),
+      recentTargetFillIds: ids.filter((entry) => entry.id.startsWith(targetPrefix)).map((entry) => entry.id),
+      sourceOrderToTargetCloid,
+      accountMode: context.accountMode ?? "UNKNOWN",
+      lastSourceSnapshotAt: Number.isFinite(Number(context.sourceSnapshot?.receivedAt)) ? Number(context.sourceSnapshot.receivedAt) : null,
+      lastTargetSnapshotAt: Number.isFinite(Number(context.targetSnapshot?.receivedAt)) ? Number(context.targetSnapshot.receivedAt) : null,
+      killSwitch: actor?.killed === true || actor?.blocked === true,
+    };
   }
 }

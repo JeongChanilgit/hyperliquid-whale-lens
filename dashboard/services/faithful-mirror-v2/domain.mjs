@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const MAX_TRACKED_WHALES = 5;
 export const ZERO_EPSILON = 1e-12;
 
@@ -8,7 +10,20 @@ export const DEFAULT_MIRROR_CONFIG = Object.freeze({
   terminalVerificationDelayMs: 1_000,
   maxCatchUpSlippageBps: 50,
   killOnTerminalResidual: true,
+  minimumOrderNotionalUsd: 1,
+  minimumOrderSize: 0,
 });
+
+export const MIRROR_FAILURE_CODES = Object.freeze({
+  ISOLATED_MARGIN_DATA_UNAVAILABLE: "ISOLATED_MARGIN_DATA_UNAVAILABLE",
+  MARGIN_POOL_DATA_UNAVAILABLE: "MARGIN_POOL_DATA_UNAVAILABLE",
+});
+
+const domainFailure = (code, message) => {
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  return error;
+};
 
 const finite = (value, label) => {
   const number = Number(value);
@@ -65,10 +80,14 @@ export const signedPositionNotionalUsd = (position) => {
 };
 
 export const marginPoolEquityUsd = (snapshot, poolId = "default") => {
+  const normalizedPoolId = String(poolId ?? "default");
   const pools = snapshot?.marginPools ?? {};
-  const pool = pools[poolId] ?? pools.default;
+  const pool = pools[normalizedPoolId];
   if (pool && Number.isFinite(Number(pool.equityUsd)) && Number(pool.equityUsd) > 0) {
     return Number(pool.equityUsd);
+  }
+  if (normalizedPoolId !== "default") {
+    throw domainFailure(MIRROR_FAILURE_CODES.MARGIN_POOL_DATA_UNAVAILABLE, `equity for pool ${normalizedPoolId} is missing`);
   }
   return positive(snapshot?.accountEquityUsd, "snapshot.accountEquityUsd");
 };
@@ -88,9 +107,14 @@ export const targetPositionFromSource = ({ sourcePosition, sourceSnapshot, targe
   let isolatedMarginRatio = null;
   let targetIsolatedMarginUsd = null;
   if (sourceLeverage.type === "isolated") {
-    const sourceMarginUsedUsd = positive(sourcePosition.marginUsedUsd, `${coin}.marginUsedUsd`);
+    const sourceMarginUsedUsd = Number(sourcePosition.marginUsedUsd);
+    if (!Number.isFinite(sourceMarginUsedUsd) || sourceMarginUsedUsd <= 0) {
+      throw domainFailure(MIRROR_FAILURE_CODES.ISOLATED_MARGIN_DATA_UNAVAILABLE, `${coin}.marginUsedUsd must be a positive observed value`);
+    }
     const sourceAbsoluteNotionalUsd = Math.abs(sourceSignedNotionalUsd);
-    if (sourceAbsoluteNotionalUsd <= ZERO_EPSILON) throw new Error(`Cannot scale isolated margin for flat ${coin}`);
+    if (sourceAbsoluteNotionalUsd <= ZERO_EPSILON) {
+      throw domainFailure(MIRROR_FAILURE_CODES.ISOLATED_MARGIN_DATA_UNAVAILABLE, `cannot derive a margin ratio for flat ${coin}`);
+    }
     isolatedMarginRatio = sourceMarginUsedUsd / sourceAbsoluteNotionalUsd;
     targetIsolatedMarginUsd = Math.abs(targetSignedNotionalUsd) * isolatedMarginRatio;
   }
@@ -144,29 +168,67 @@ export const positionSizeForCoin = (snapshot, coin) => {
   return position ? finite(position.signedSize, `${normalized}.signedSize`) : 0;
 };
 
-export const scaleSourceOrder = ({ sourceOrder, sourceSnapshot, targetSnapshot, targetPositionSize = 0 }) => {
+export const scaleSourceOrder = ({
+  sourceOrder,
+  sourceSnapshot,
+  targetSnapshot,
+  targetPositionSize = 0,
+  minNotionalUsd = 0,
+  sizeStep = 0,
+}) => {
   const coin = normalizeCoin(sourceOrder.coin);
   const poolId = sourceOrder.poolId ?? "default";
   const sourceEquityUsd = marginPoolEquityUsd(sourceSnapshot, poolId);
   const targetEquityUsd = marginPoolEquityUsd(targetSnapshot, poolId);
   const balanceScale = targetEquityUsd / sourceEquityUsd;
   const sourceRemainingSize = Math.max(0, finite(sourceOrder.remainingSize ?? sourceOrder.size, `${coin}.remainingSize`));
-  let targetRemainingSize = sourceRemainingSize * balanceScale;
+  const side = String(sourceOrder.side).toUpperCase() === "B"
+    ? "BUY"
+    : String(sourceOrder.side).toUpperCase() === "A"
+      ? "SELL"
+      : String(sourceOrder.side).toUpperCase();
+  const price = positive(sourceOrder.price ?? sourceOrder.limitPrice ?? sourceOrder.limitPx, `${coin}.price`);
+  const targetUnroundedRemainingSize = sourceRemainingSize * balanceScale;
+  let targetRemainingSize = targetUnroundedRemainingSize;
   const reduceOnly = sourceOrder.reduceOnly === true;
-  if (reduceOnly) targetRemainingSize = Math.min(targetRemainingSize, Math.abs(targetPositionSize));
+  const actualTargetPosition = finite(targetPositionSize, `${coin}.targetPositionSize`);
+  if (reduceOnly) {
+    const reducibleSize = side === "BUY"
+      ? Math.max(0, -actualTargetPosition)
+      : side === "SELL"
+        ? Math.max(0, actualTargetPosition)
+        : 0;
+    targetRemainingSize = Math.min(targetRemainingSize, reducibleSize);
+  }
+  const normalizedSizeStep = Number(sizeStep);
+  if (Number.isFinite(normalizedSizeStep) && normalizedSizeStep > 0) {
+    targetRemainingSize = Math.floor((targetRemainingSize + ZERO_EPSILON) / normalizedSizeStep) * normalizedSizeStep;
+  }
+  const normalizedMinNotionalUsd = Number(minNotionalUsd);
+  if (!Number.isFinite(normalizedMinNotionalUsd) || normalizedMinNotionalUsd < 0) {
+    throw new Error("minNotionalUsd must be a non-negative finite number");
+  }
+  const targetNotionalUsd = targetRemainingSize * price;
+  const belowMinimum = targetRemainingSize > ZERO_EPSILON && targetNotionalUsd + ZERO_EPSILON < normalizedMinNotionalUsd;
+  if (belowMinimum) targetRemainingSize = 0;
   return {
     sourceOrderId: String(sourceOrder.id ?? sourceOrder.oid),
     clientOrderId: String(sourceOrder.clientOrderId ?? sourceOrder.cloid ?? ""),
     coin,
     poolId,
-    side: String(sourceOrder.side).toUpperCase() === "B" ? "BUY" : String(sourceOrder.side).toUpperCase() === "A" ? "SELL" : String(sourceOrder.side).toUpperCase(),
-    price: positive(sourceOrder.price ?? sourceOrder.limitPrice ?? sourceOrder.limitPx, `${coin}.price`),
+    side,
+    price,
     triggerPrice: sourceOrder.triggerPrice == null ? null : positive(sourceOrder.triggerPrice, `${coin}.triggerPrice`),
     orderType: String(sourceOrder.orderType ?? "LIMIT").toUpperCase(),
     tif: String(sourceOrder.tif ?? "GTC").toUpperCase(),
     reduceOnly,
+    leverage: cloneLeverage(sourceOrder.leverage),
     sourceRemainingSize,
+    targetUnroundedRemainingSize,
     targetRemainingSize,
+    targetNotionalUsd,
+    belowMinimum,
+    minNotionalUsd: normalizedMinNotionalUsd,
     balanceScale,
     leverage: cloneLeverage(sourceOrder.leverage),
     status: String(sourceOrder.status ?? "OPEN").toUpperCase(),
@@ -201,11 +263,12 @@ export const residualBps = ({ desiredSize, actualSize }) => {
 };
 
 export const deterministicTargetOrderId = (pairId, sourceOrderId) => {
-  const text = `${pairId}|${sourceOrderId}`;
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `fmv2-${(hash >>> 0).toString(16).padStart(8, "0")}-${String(sourceOrderId).slice(-12)}`;
+  const digest = createHash("sha256")
+    .update(`${String(pairId)}|${String(sourceOrderId)}`, "utf8")
+    .digest("hex");
+  return `0x${digest.slice(0, 32)}`;
 };
+
+// A named Cloid export makes the transport contract explicit.  Keep the former
+// deterministicTargetOrderId export as a compatibility alias for existing ports.
+export const canonicalTargetCloid = deterministicTargetOrderId;

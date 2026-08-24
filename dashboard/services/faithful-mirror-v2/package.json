@@ -9,6 +9,6 @@
   "scripts": {
     "start": "node index.mjs",
     "test": "node --test *.test.mjs",
-    "check": "node --check index.mjs && node --check runtime.mjs && node --check paper-runtime.mjs && node --check pair-actor.mjs && python -m py_compile hyperliquid_pair_bridge.py"
+    "check": "node --check index.mjs && node --check config.mjs && node --check control-server.mjs && node --check audit-store.mjs && node --check runtime.mjs && node --check paper-runtime.mjs && node --check pair-actor.mjs && python -m py_compile hyperliquid_pair_bridge.py"
   }
 }

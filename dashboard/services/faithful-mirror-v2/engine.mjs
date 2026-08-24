@@ -1,8 +1,6 @@
 import { MAX_TRACKED_WHALES, normalizeAddress } from "./domain.mjs";
 import { FaithfulPairActor } from "./pair-actor.mjs";
 
-const clone = (value) => structuredClone(value);
-
 export class FiveWhaleFaithfulMirrorEngine {
   constructor({ pairs, executionFactory, actorConfig = {}, log = () => {} }) {
     if (!Array.isArray(pairs) || pairs.length < 1 || pairs.length > MAX_TRACKED_WHALES) {
@@ -20,6 +18,7 @@ export class FiveWhaleFaithfulMirrorEngine {
       if (this.actorsByPair.has(pairId)) throw new Error(`Duplicate pairId: ${pairId}`);
       const sourceAddress = normalizeAddress(input.sourceAddress);
       const targetAddress = normalizeAddress(input.targetAddress);
+      if (sourceAddress === targetAddress) throw new Error(`Source and target must differ for pair ${pairId}`);
       if (sources.has(sourceAddress)) throw new Error(`Duplicate source whale: ${sourceAddress}`);
       if (targets.has(targetAddress)) throw new Error(`Duplicate target account: ${targetAddress}`);
       sources.add(sourceAddress);
@@ -53,36 +52,85 @@ export class FiveWhaleFaithfulMirrorEngine {
     await actor.bootstrap(payload);
   }
 
+  restoreOrderOwnership(pairId, payload) {
+    const normalizedPairId = String(pairId);
+    const actor = this.actorsByPair.get(normalizedPairId);
+    const execution = this.executionByPair.get(normalizedPairId);
+    if (!actor || !execution) throw new Error(`Unknown pair: ${pairId}`);
+    const result = actor.restoreOrderOwnership(payload);
+    // The live port needs the validated Cloids before its preflight cleanup;
+    // otherwise it would cancel the very order the actor is about to retain.
+    execution.restoreOrderOwnership?.({ pairId: normalizedPairId, ...payload });
+    return result;
+  }
+
   onSourceSnapshot(sourceAddress, snapshot) {
-    this.#actorBySource(sourceAddress).onSourceSnapshot(snapshot);
+    const actor = this.#actorBySource(sourceAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    actor.onSourceSnapshot(snapshot);
+    return { accepted: true };
   }
 
   onTargetSnapshot(targetAddress, snapshot) {
-    this.#actorByTarget(targetAddress).onTargetSnapshot(snapshot);
+    const actor = this.#actorByTarget(targetAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    actor.onTargetSnapshot(snapshot);
+    return { accepted: true };
   }
 
   onSourceFill(sourceAddress, fill) {
-    this.#actorBySource(sourceAddress).onSourceFill(fill);
+    const actor = this.#actorBySource(sourceAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    actor.onSourceFill(fill);
+    return { accepted: true };
   }
 
   onTargetFill(targetAddress, fill) {
-    this.#actorByTarget(targetAddress).onTargetFill(fill);
+    const actor = this.#actorByTarget(targetAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    actor.onTargetFill(fill);
+    return { accepted: true };
   }
 
   async onSourceOrder(sourceAddress, update) {
-    await this.#actorBySource(sourceAddress).onSourceOrder(update);
+    const actor = this.#actorBySource(sourceAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    await actor.onSourceOrder(update);
+    return { accepted: true };
   }
 
   onTargetOrder(targetAddress, update) {
-    this.#actorByTarget(targetAddress).onTargetOrder(update);
+    const actor = this.#actorByTarget(targetAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    actor.onTargetOrder(update);
+    return { accepted: true };
   }
 
   async syncSourceOrders(sourceAddress, orders) {
-    await this.#actorBySource(sourceAddress).syncSourceOrders(orders);
+    const actor = this.#actorBySource(sourceAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    await actor.syncSourceOrders(orders);
+    return { accepted: true };
   }
 
   syncTargetOrders(targetAddress, orders) {
-    this.#actorByTarget(targetAddress).syncTargetOrders(orders);
+    const actor = this.#actorByTarget(targetAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    actor.syncTargetOrders(orders);
+    return { accepted: true };
+  }
+
+  onCurrentMark(sourceAddress, coin, markPriceUsd) {
+    const actor = this.#actorBySource(sourceAddress);
+    if (actor.isTerminal()) return { ignored: true, reason: "PAIR_TERMINAL" };
+    actor.onCurrentMark(coin, markPriceUsd);
+    return { accepted: true };
+  }
+
+  isPairTerminal(pairId) {
+    const actor = this.actorsByPair.get(String(pairId));
+    if (!actor) throw new Error(`Unknown pair: ${pairId}`);
+    return actor.isTerminal();
   }
 
   async whenIdle() {
@@ -109,4 +157,5 @@ export class FiveWhaleFaithfulMirrorEngine {
     if (!pairId) throw new Error(`Unknown target account: ${address}`);
     return this.actorsByPair.get(pairId);
   }
+
 }
