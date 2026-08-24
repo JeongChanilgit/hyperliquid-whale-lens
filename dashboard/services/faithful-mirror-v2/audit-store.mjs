@@ -1,10 +1,12 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const SECRET_KEY = /(?:private|secret|token|signature|signedpayload|authorization|password|mnemonic|api[_-]?key)/i;
 const PRIVATE_KEY_VALUE = /^0x[a-f0-9]{64}$/i;
 const MAX_DEPTH = 14;
 const MAX_RECENT_IDS = 2_000;
+const MAX_RECENT_EVENT_LIMIT = 200;
+const MAX_RECENT_EVENT_BYTES = 512 * 1024;
 
 const cloneSafe = (value, { secretValues = new Set(), depth = 0 } = {}) => {
   if (depth > MAX_DEPTH) return "[TRUNCATED_DEPTH]";
@@ -31,8 +33,9 @@ const atomicJson = async (path, value) => {
   await rename(temporary, path);
 };
 
-const asInteger = (value, fallback = null) => Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : fallback;
+const asInteger = (value, fallback = null) => value == null || value === "" || !Number.isFinite(Number(value)) ? fallback : Math.trunc(Number(value));
 const asRecentIds = (value) => [...new Set((Array.isArray(value) ? value : []).map(String))].slice(-MAX_RECENT_IDS);
+const boundedLimit = (value, fallback = 50) => Math.min(MAX_RECENT_EVENT_LIMIT, Math.max(1, asInteger(value, fallback)));
 
 export const sanitizeForAudit = (value, secretValues = []) => cloneSafe(value, { secretValues: new Set(secretValues.filter(Boolean)) });
 
@@ -112,6 +115,49 @@ export class JsonlAuditStore {
     } catch (error) {
       if (error?.code === "ENOENT") return null;
       throw error;
+    }
+  }
+
+  /**
+   * Read only a bounded tail of the append-only event stream.  This protects
+   * the local status/control plane from an unbounded historical audit file
+   * while retaining the newest complete JSONL records for observability.
+   */
+  async readRecentEvents({ limit = 50 } = {}) {
+    const safeLimit = boundedLimit(limit);
+    let handle;
+    try {
+      handle = await open(this.eventsPath, "r");
+      const metadata = await handle.stat();
+      const byteLength = Math.min(Math.max(0, metadata.size), MAX_RECENT_EVENT_BYTES);
+      if (byteLength === 0) return [];
+      const offset = metadata.size - byteLength;
+      const buffer = Buffer.alloc(byteLength);
+      await handle.read(buffer, 0, byteLength, offset);
+      const lines = buffer.toString("utf8").split(/\r?\n/);
+      // A tail read can begin halfway through a JSON record.  Drop only that
+      // incomplete first fragment; all later newline-delimited records remain.
+      if (offset > 0) lines.shift();
+      const events = [];
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            events.push(sanitizeForAudit(parsed, this.secretValues));
+          }
+        } catch {
+          // A damaged historical line must not make the read-only status
+          // surface unavailable. New records remain append-only and atomic per
+          // line from this store's writer.
+        }
+      }
+      return events.slice(-safeLimit);
+    } catch (error) {
+      if (error?.code === "ENOENT") return [];
+      throw error;
+    } finally {
+      await handle?.close();
     }
   }
 

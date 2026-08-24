@@ -10,10 +10,12 @@
   - `dashboard/app/hooks/`: local runner status/audit UI state plus the legacy browser paper monitor.
   - `dashboard/app/lib/`: Hyperliquid API, IndexedDB cache, episode/log classification, historical carry-in entry reconstruction, real-time ledger, risk gates, and server-only Hyperliquid lifecycle execution bridge.
   - `dashboard/app/api/copy-engine/`: localhost-only bridge to the durable standalone runner; not itself a 24/7 worker.
+  - `dashboard/app/api/faithful-mirror-v2/`: localhost-only, GET-only observability bridge for Faithful Mirror V2. It attaches the control token server-side, returns bounded redacted status/events, and never exposes a browser arm/start/order action or a LIVE target mapping.
   - `dashboard/app/api/audit/`, `dashboard/db/`, `dashboard/drizzle/`: single-user local audit, wallet, order, run, log, and performance persistence.
   - `dashboard/services/copy-runner/`: standalone long-lived Hyperliquid collector with SQLite audit, strict canonical and simulation-only research cohort hash loaders, and `hyperliquid_bridge.py`, a persistent official-SDK signer/executor used only by an explicitly enabled live runner.
     - `simple-twr-whales.ts`: explicit simulation-only loader that cross-checks the complete portfolio-only report, its compact runner state, ordered TOP10, and report-file hash.
   - `dashboard/services/faithful-mirror-v2/`: isolated 1–5 source/target-pair faithful state-mirror service. PAPER and LIVE share the same pair actor; PAPER bootstraps current positions at current L2 prices, while LIVE remains explicitly armed and server-signed. Its audit/checkpoint files, control port, and target accounts are separate from the legacy copy runner and its SQLite databases.
+  - `dashboard/app/components/FaithfulMirrorDashboard.tsx`, `dashboard/app/hooks/use-faithful-mirror-status.ts`: shared PAPER/LIVE read-only presentation, one-second local status polling, browser-session equity samples, exposure/reconciliation/order/debt/event diagnostics, and an always-locked LIVE readiness view.
   - `dashboard/scripts/`: preload/compaction tasks and Windows local stack start/status/stop commands; a new runner starts only from complete canonical screener output.
   - `dashboard/public/preloaded/`: generated 30-day wallet snapshots for all screened TOP 50 addresses; refresh through `npm run data:prefetch` rather than hand editing.
   - `dashboard/.openai/hosting.json`: Sites deployment configuration.
@@ -64,6 +66,7 @@ Build and test entrypoints:
 - Test: `python -m unittest discover -s tests -v`
 - Run: `python src/hyperliquid_whale_screener.py`
 - Dashboard local stack: run `npm run local:start`, `npm run local:status`, or `npm run local:stop` from `dashboard/`.
+- Faithful Mirror V2 local stack: run `npm run fmv2:local:start`, `npm run fmv2:local:status`, or `npm run fmv2:local:stop` from `dashboard/`. It uses ports 8790/3001 by default, verifies the saved simple-TWR ranks 1–5, archives prior V2 evidence without deleting it, forces PAPER/no signing, and never manages the legacy runner on port 8788.
 - Dashboard dev: run `npm run dev` from `dashboard/`.
 - Dashboard checks: run `npm run lint`, `npm run build`, and the focused Node tests from `dashboard/`.
 - Dashboard canonical sync: after a complete hash-verified run, run `npm run data:sync-canonical` from `dashboard/` to regenerate the ACTIVE TOP10 plus 40 standby seeds.

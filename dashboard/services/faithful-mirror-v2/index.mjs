@@ -293,6 +293,7 @@ export const main = async () => {
   await lifecycle.initialize();
   const control = createControlServer({
     lifecycle,
+    auditStore,
     host: config.control.host,
     port: config.control.port,
     controlToken: config.control.token,

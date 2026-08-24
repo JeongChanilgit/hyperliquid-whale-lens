@@ -358,7 +358,6 @@ test("live recovery restores bounded identities and suppresses the inclusive bac
   const target = "0x4444444444444444444444444444444444444444";
   const fillTime = Date.now();
   const originalFill = { coin: "BTC", side: "B", sz: "1", px: "100", startPosition: "0", time: fillTime, tid: "recovery-original" };
-  const newerFill = { coin: "BTC", side: "A", sz: "0.25", px: "100", startPosition: "1", time: fillTime + 2, tid: "recovery-new" };
   const accountSnapshot = () => ({ clearinghouseStates: [["main", { marginSummary: { accountValue: "100" }, assetPositions: [] }]] });
   const makeEngine = (delivered) => ({
     attachActionTransport: () => {},

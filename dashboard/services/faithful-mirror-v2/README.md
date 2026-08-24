@@ -81,6 +81,21 @@ not a hidden Faithful Mirror risk cap.
 
 ## Local runs
 
+For the integrated single-user PAPER service plus dashboard, run these from
+`dashboard/`:
+
+```powershell
+npm run fmv2:local:start
+npm run fmv2:local:status
+npm run fmv2:local:stop
+```
+
+The integrated start verifies that the committed PAPER sources exactly match
+saved simple-TWR ranks 1–5, moves prior V2 runtime evidence into the ignored
+history directory, starts a fresh PAPER service on port 8790, and starts the
+read-only dashboard on port 3001. It clears every LIVE signing environment
+input and does not manage or stop the legacy copy runner on port 8788.
+
 From this directory on PowerShell:
 
 ```powershell

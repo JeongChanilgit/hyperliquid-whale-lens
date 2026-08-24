@@ -12,7 +12,6 @@ const asNumber = (value) => {
   return Number.isFinite(number) ? number : null;
 };
 const valueAt = (value, key, fallback = null) => record(value)?.[key] ?? fallback;
-const orderStatusOpen = (status) => ["open", "resting", "partial", "triggered", "pending"].includes(String(status ?? "open").toLowerCase());
 const DEFAULT_FILL_DEDUP_MAX = 100_000;
 const DEFAULT_FILL_DEDUP_AGE_MS = 6 * 60 * 60 * 1_000;
 const DEFAULT_LEVERAGE_CACHE_TTL_MS = 5 * 60 * 1_000;

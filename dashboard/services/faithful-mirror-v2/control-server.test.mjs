@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createControlServer, isControlTokenMatch } from "./control-server.mjs";
+import { createControlServer, isControlTokenMatch, normalizeControlEvent } from "./control-server.mjs";
 
 const token = "control-token-at-least-16";
 
@@ -40,4 +40,101 @@ test("token check requires exact value and control server remains loopback-only"
   assert.equal(isControlTokenMatch(`${token}x`, token), false);
   assert.equal(isControlTokenMatch("x".repeat(token.length), token), false);
   assert.throws(() => createControlServer({ lifecycle: { status() {} }, host: "0.0.0.0", controlToken: token }), /loopback/);
+});
+
+test("control server returns a bounded, normalized authenticated event feed", async (t) => {
+  const requests = [];
+  const auditStore = {
+    async readRecentEvents({ limit }) {
+      requests.push(limit);
+      return [{
+        at: 1_725_000_000_000,
+        type: "TRACKING_DEBT",
+        pairId: "pair-1",
+        coin: "BTC",
+        reason: "below minimum notional",
+        desiredSize: 1.5,
+        leakedToken: "must-not-cross-the-control-plane",
+      }];
+    },
+  };
+  const control = createControlServer({
+    lifecycle: { async status() { return { state: "STOPPED" }; } },
+    auditStore,
+    host: "127.0.0.1",
+    port: 0,
+    controlToken: token,
+  });
+  t.after(() => control.close());
+  const address = await control.listen();
+  const base = `http://127.0.0.1:${address.port}`;
+  assert.equal((await fetch(`${base}/events?limit=1000`)).status, 401);
+  const response = await fetch(`${base}/events?limit=1000`, { headers: { "x-fmv2-control-token": token } });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(requests, [200]);
+  assert.deepEqual(body.events, [{
+    at: 1_725_000_000_000,
+    type: "TRACKING_DEBT",
+    pairId: "pair-1",
+    coin: "BTC",
+    side: null,
+    message: "below minimum notional",
+    details: { reason: "below minimum notional", desiredSize: 1.5 },
+  }]);
+  assert.doesNotMatch(JSON.stringify(body), /must-not-cross-the-control-plane/);
+});
+
+test("event normalization only retains the display-safe allowlist", () => {
+  assert.deepEqual(normalizeControlEvent({
+    type: "SERVICE_START_FAILED",
+    error: { message: "bridge rejected request" },
+    privateKey: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    nested: { token: "not-safe" },
+  }), {
+    at: null,
+    type: "SERVICE_START_FAILED",
+    pairId: null,
+    coin: null,
+    side: null,
+    message: "bridge rejected request",
+    details: {},
+  });
+  assert.deepEqual(normalizeControlEvent({
+    type: "SERVICE_EVENT",
+    accepted: true,
+    message: "authorization=server-token-value 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  }), {
+    at: null,
+    type: "SERVICE_EVENT",
+    pairId: null,
+    coin: null,
+    side: null,
+    message: "authorization=[REDACTED] [REDACTED]",
+    details: { accepted: true },
+  });
+  assert.equal(
+    normalizeControlEvent({ type: "PAIR_READY", message: "target 0x1111111111111111111111111111111111111111" }).message,
+    "target [ADDRESS_REDACTED]",
+  );
+  assert.deepEqual(normalizeControlEvent({
+    type: "TRACKING_DEBT",
+    at: 42,
+    pairId: "whale-1",
+    detail: {
+      coin: "BTC",
+      side: "SELL",
+      reason: "below minimum notional",
+      residualBps: 13.5,
+      targetAddress: "0x2222222222222222222222222222222222222222",
+    },
+  }), {
+    at: 42,
+    type: "TRACKING_DEBT",
+    pairId: "whale-1",
+    coin: "BTC",
+    side: "SELL",
+    message: "below minimum notional",
+    details: { reason: "below minimum notional", residualBps: 13.5 },
+  });
 });

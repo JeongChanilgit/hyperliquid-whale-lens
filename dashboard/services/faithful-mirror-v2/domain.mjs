@@ -230,7 +230,6 @@ export const scaleSourceOrder = ({
     belowMinimum,
     minNotionalUsd: normalizedMinNotionalUsd,
     balanceScale,
-    leverage: cloneLeverage(sourceOrder.leverage),
     status: String(sourceOrder.status ?? "OPEN").toUpperCase(),
   };
 };
