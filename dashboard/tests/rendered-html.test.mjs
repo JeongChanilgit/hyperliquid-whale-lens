@@ -27,10 +27,12 @@ test("server-renders the Whale Lens workspace shell", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
-test("ships the login-free localhost runner bridge without browser credentials", async () => {
-  const [page, liveCopyHook, layout, packageJson, route, hyperliquidAdapter, tradingChart, copyTradingPanel, runner] = await Promise.all([
+test("ships the login-free read-only Faithful Mirror dashboard without browser credentials", async () => {
+  const [page, faithfulHook, faithfulPanel, faithfulRoute, layout, packageJson, route, hyperliquidAdapter, tradingChart, copyTradingPanel, runner] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/hooks/use-live-copy-session.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/hooks/use-faithful-mirror-status.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/FaithfulMirrorDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/faithful-mirror-v2/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/api/copy-engine/route.ts", import.meta.url), "utf8"),
@@ -39,15 +41,21 @@ test("ships the login-free localhost runner bridge without browser credentials",
     readFile(new URL("../app/components/CopyTradingPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../services/copy-runner/runner.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /Hyperliquid 실투자/);
-  assert.match(page, /실전 실행 승인/);
-  assert.match(page, /useLiveCopySession/);
-  assert.match(page, /liveSession\.whales\.length/);
+  assert.match(page, /Hyperliquid 실전투자/);
+  assert.match(page, /FaithfulMirrorDashboard/);
+  assert.match(page, /useFaithfulMirrorStatus/);
+  assert.doesNotMatch(page, /useLiveCopySession/);
   assert.doesNotMatch(page, /10-WHALE REALTIME FOLLOW/);
-  assert.match(liveCopyHook, /snapshot\?\.watchedWhales/);
-  assert.match(liveCopyHook, /runtimeWhaleIds/);
-  assert.match(liveCopyHook, /equityHistory/);
-  assert.match(page, /equityHistory=\{activeSessionMatches \? liveSession\.equityHistory : \[\]\}/);
+  assert.match(faithfulHook, /\/api\/faithful-mirror-v2/);
+  assert.match(faithfulHook, /canStart:\s*false/);
+  assert.match(faithfulPanel, /PORTFOLIO_ONLY_ESTIMATE/);
+  assert.match(faithfulPanel, /LOCKED/);
+  assert.match(faithfulPanel, /유효 레버리지/);
+  assert.doesNotMatch(faithfulPanel, /\/arm|\/start|signProtectedIoc/);
+  assert.match(faithfulRoute, /requireLocalRequest/);
+  assert.match(faithfulRoute, /FMV2_CONTROL_TOKEN/);
+  assert.match(faithfulRoute, /targetAccountLabel/);
+  assert.doesNotMatch(faithfulRoute, /export async function POST/);
   assert.doesNotMatch(page, /usePaperCopySession/);
   assert.match(page, /selectedTradeId/);
   assert.match(page, /walletRequestRef/);

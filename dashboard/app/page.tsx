@@ -6,10 +6,9 @@ import TradingChart, {
   type TradingChartMarker,
   type TradingChartMarkerKind,
 } from "./components/TradingChart";
-import CopyTradingPanel from "./components/CopyTradingPanel";
-import RescueAnalysisPanel from "./components/RescueAnalysisPanel";
+import FaithfulMirrorDashboard from "./components/FaithfulMirrorDashboard";
 import TradeReturnAnalysis, { buildFlowNeutralPortfolioPerformance } from "./components/TradeReturnAnalysis";
-import { useLiveCopySession } from "./hooks/use-live-copy-session";
+import { useFaithfulMirrorStatus } from "./hooks/use-faithful-mirror-status";
 import {
   loadCandles,
   loadWalletBundle,
@@ -29,7 +28,7 @@ type WalletItem = {
   status: "ACTIVE" | "PASS" | "WATCH";
 };
 
-type ProductModule = "analysis" | "rescue" | "paper" | "live";
+type ProductModule = "analysis" | "paper" | "live";
 
 const WALLET_STORAGE_KEY = "whale-lens-wallets-v3-compounded-top50";
 const LEGACY_WALLET_STORAGE_KEYS = ["whale-lens-wallets-v2-cashflow-top30"] as const;
@@ -285,13 +284,10 @@ export default function Home() {
   }, [toast]);
 
   const activeWallet = wallets.find((wallet) => wallet.address === activeAddress) ?? wallets[0];
-  const copyWalletInputs = useMemo(
-    () => wallets.map((wallet) => ({ address: wallet.address, label: wallet.label })),
-    [wallets],
-  );
-  const liveSession = useLiveCopySession(copyWalletInputs, productModule !== "analysis");
-  const requestedSessionMode = productModule === "paper" ? "SIMULATION" : "HYPERLIQUID";
-  const activeSessionMatches = liveSession.sessionMode === requestedSessionMode;
+  // Faithful Mirror V2 uses a separate localhost-only service and persistence
+  // domain. The dashboard only polls its read-only status endpoint; it never
+  // starts, arms, signs, or posts an order from browser code.
+  const faithfulMirrorStatus = useFaithfulMirrorStatus({ enabled: productModule !== "analysis" });
   const coinCounts = useMemo(() => {
     const counts = new Map<string, number>();
     walletBundle?.events.forEach((event) => counts.set(event.coin, (counts.get(event.coin) ?? 0) + 1));
@@ -377,19 +373,6 @@ export default function Home() {
   const candleCacheLabel = candleData
     ? `${cacheText(candleData.cacheHit, candleData.fetchedAt)}${latestCandleTime > 0 ? ` · 마지막 캔들 ${formatTime(latestCandleTime)}` : ""}`
     : "필요할 때 로드";
-  const liveFailureLogs = useMemo(
-    () => liveSession.error
-      ? [{
-          id: "live-runtime-status",
-          occurredAt: new Date().toISOString(),
-          severity: "warning" as const,
-          code: "LIVE_RUNTIME",
-          message: liveSession.error,
-        }, ...liveSession.failureLogs]
-      : liveSession.failureLogs,
-    [liveSession.error, liveSession.failureLogs],
-  );
-
   const selectEvent = (event: TradingEvent) => {
     setSelectedTradeId(event.id);
     if (event.coin !== selectedCoin) {
@@ -434,13 +417,6 @@ export default function Home() {
 
         <nav className="mode-nav" aria-label="제품 모듈">
           <button
-            className={`mode-nav__item ${productModule === "rescue" ? "is-active" : ""}`}
-            type="button"
-            onClick={() => setProductModule("rescue")}
-          >
-            계좌 구제 <small>EVIDENCE</small>
-          </button>
-          <button
             className={`mode-nav__item ${productModule === "analysis" ? "is-active" : ""}`}
             type="button"
             onClick={() => setProductModule("analysis")}
@@ -452,14 +428,14 @@ export default function Home() {
             type="button"
             onClick={() => setProductModule("paper")}
           >
-            모의투자 <small>LIVE</small>
+            모의투자 <small>V2</small>
           </button>
           <button
             className={`mode-nav__item ${productModule === "live" ? "is-active" : ""}`}
             type="button"
             onClick={() => setProductModule("live")}
           >
-            Hyperliquid 실투자 <small>{liveSession.executionEnabled ? (liveSession.testnet ? "TESTNET" : "ARMED") : "LOCKED"}</small>
+            Hyperliquid 실전투자 <small>LOCKED</small>
           </button>
         </nav>
 
@@ -483,7 +459,7 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="address-bar" aria-label="지갑 관리">
+      {productModule === "analysis" ? <section className="address-bar" aria-label="지갑 관리">
         <label className="wallet-select-wrap">
           <span>관찰 지갑</span>
           <select value={activeAddress} onChange={(event) => setActiveAddress(event.target.value)}>
@@ -512,7 +488,7 @@ export default function Home() {
               ? cacheText(walletBundle.cacheHit, walletBundle.fetchedAt)
               : "연결 대기"}
         </div>
-      </section>
+      </section> : null}
 
       {productModule === "analysis" ? (
       <section className="workspace-grid">
@@ -731,93 +707,15 @@ export default function Home() {
 
           <section className="future-rail" aria-label="카피 투자 모듈">
             <div><span>SIM</span><p><strong>모의투자</strong>고래 자본 대비 포지션 비율을 동일하게 추적</p><em>READY</em></div>
-            <div><span>HL</span><p><strong>Hyperliquid 실투자</strong>동일 거래소 주문·레버리지 복제</p><em>{liveSession.executionEnabled ? "READY" : "LOCKED"}</em></div>
+            <div><span>HL</span><p><strong>Hyperliquid 실전투자</strong>Faithful Mirror V2 상태를 읽기 전용으로 감시</p><em>LOCKED</em></div>
           </section>
         </aside>
       </section>
-      ) : productModule === "rescue" ? (
-        <RescueAnalysisPanel />
       ) : (
-        <section className="copy-workspace">
-          <div className="copy-workspace__intro">
-            <div>
-              <span className="eyebrow">{liveSession.whales.length}-WHALE REALTIME FOLLOW</span>
-              <h1>{productModule === "paper" ? "모의투자 트래킹" : "Hyperliquid 실전 카피"}</h1>
-              <p>
-                {productModule === "paper"
-                  ? liveSession.entryPolicy === "NEW_POSITIONS_ONLY"
-                    ? `세션 시작 전 보유분과 그 청산 주문은 제외합니다. 이후 기존 포지션에 추가 진입한 수량과 새로 여는 포지션은 복제하고, 후속 축소·청산은 우리가 복제한 수량까지만 따릅니다. 지갑별 시작 증거금은 ${formatUsd(liveSession.sizing?.allocationPerWhaleUsd ?? 100, 0)}이며 레버리지와 cross/isolated는 고래 설정을 그대로 따릅니다.`
-                    : `고래 주문수량 × (우리 현재자산 ÷ 고래 현재자산)으로 서로 독립된 모의지갑을 운용합니다. 지갑별 시작 증거금은 ${formatUsd(liveSession.sizing?.allocationPerWhaleUsd ?? 100, 0)}이며, 레버리지와 cross/isolated는 고래 설정을 그대로 복제합니다.`
-                  : `고래의 지정가·수정·취소·TP/SL과 레버리지를 같은 Hyperliquid로 전달하도록 준비합니다. 웹소켓 수신 뒤 비동기로 제출하며, 고래 전량체결 1초 뒤 미체결 잔량은 취소 후 시장가로 보정하고 전 과정을 기록합니다. 실제 target 체결·수수료·손익 확인값은 별도로 구분합니다.`}
-              </p>
-            </div>
-            <div className="copy-workspace__runtime">
-              <span className={liveSession.serverConnected ? "is-ready" : ""} />
-              {productModule === "paper"
-                ? liveSession.serverConnected ? "로컬 상시 runner 연결됨" : "로컬 runner 연결 필요"
-                : liveSession.serverConnected
-                  ? liveSession.sessionMode === "SIMULATION"
-                    ? "현재 runner는 모의 세션 · 실전 데이터 없음"
-                    : liveSession.executionEnabled ? "실행 서버와 Hyperliquid 환경 확인됨" : "실행 서버 연결 · Hyperliquid 환경 미설정"
-                  : "실행 서버 연결 필요"}
-            </div>
-          </div>
-
-          {productModule === "live" ? (
-            <div className="live-approval">
-              <div>
-                <strong>실전 실행 승인</strong>
-                <span>서버에서 60초 동안만 유효하며, 실전 시작 성공 시 즉시 소모됩니다.</span>
-              </div>
-              <button
-                type="button"
-                className={liveSession.liveArmed ? "is-approved" : ""}
-                aria-pressed={liveSession.liveArmed}
-                disabled={!liveSession.serverConnected || !liveSession.executionEnabled || (liveSession.isRunning && liveSession.sessionMode === "HYPERLIQUID") || liveSession.loading}
-                onClick={() => void liveSession.armLive()}
-              >
-                {liveSession.liveArmed ? "서버 승인됨 (60초)" : "60초 실전 승인"}
-              </button>
-            </div>
-          ) : null}
-
-          <CopyTradingPanel
-            key={`copy-sizing-${liveSession.sizing?.allocationPerWhaleUsd ?? 100}`}
-            mode={productModule === "paper" ? "paper" : "live"}
-            sessionMode={liveSession.sessionMode}
-            isRunning={activeSessionMatches && liveSession.isRunning}
-            whales={liveSession.whales}
-            totalPnl={activeSessionMatches ? liveSession.totalPnl : 0}
-            orders={activeSessionMatches ? liveSession.orders : []}
-            equityHistory={activeSessionMatches ? liveSession.equityHistory : []}
-            failureLogs={activeSessionMatches ? liveFailureLogs : []}
-            safetyGate={productModule === "paper"
-              ? {
-                  serverConnected: liveSession.serverConnected,
-                  environmentValidated: false,
-                  executionApproved: false,
-                  message: liveSession.error ?? "모의 주문과 고래별 로그는 로컬 SQLite에 저장되며, 브라우저를 닫아도 runner는 계속 감시합니다.",
-                }
-              : {
-                  serverConnected: liveSession.serverConnected,
-                  environmentValidated: liveSession.executionEnabled,
-                  executionApproved: liveSession.liveArmed,
-                  message: liveSession.error ?? (liveSession.sessionMode === "SIMULATION"
-                    ? "현재 로컬 runner는 모의투자 전용입니다. 실전 주문은 전송되지 않습니다."
-                    : liveSession.testnet
-                      ? "Hyperliquid 테스트넷 환경입니다. 서버 승인은 60초 후 만료됩니다."
-                      : "실제 Hyperliquid 주문 환경입니다. 대상 계정과 키를 다시 확인하세요."),
-                }}
-            connectionDelayMs={liveSession.connectionDelayMs}
-            loading={liveSession.loading}
-            marginPerWhaleUsd={liveSession.sizing?.allocationPerWhaleUsd ?? 100}
-            onModeChange={(mode) => setProductModule(mode === "paper" ? "paper" : "live")}
-            onWhaleEnabledChange={liveSession.setWhaleEnabled}
-            onStart={() => liveSession.start(productModule === "paper" ? "SIMULATION" : "HYPERLIQUID")}
-            onStop={liveSession.stop}
-            onSizingApply={liveSession.configureSimulationSizing}
-          />
-        </section>
+        <FaithfulMirrorDashboard
+          mode={productModule === "paper" ? "PAPER" : "LIVE"}
+          status={faithfulMirrorStatus}
+        />
       )}
 
       {toast ? <div className="toast" role="status">{toast}</div> : null}

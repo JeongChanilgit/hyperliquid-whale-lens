@@ -1,0 +1,70 @@
+{
+  "mode": "PAPER",
+  "testnet": false,
+  "autoStart": true,
+  "pairs": [
+    {
+      "pairId": "whale-1",
+      "sourceAddress": "0x40f20b734d7d25ba0b6219e921382fa992a56a9e",
+      "targetAddress": "0x2ac68e569641e304556b2ace7bedbc9d0da46964",
+      "capitalUsd": 100
+    },
+    {
+      "pairId": "whale-2",
+      "sourceAddress": "0x9f5777bb808871052c2c5fc13d37d05e67fbc70e",
+      "targetAddress": "0x8f49922bd7d88ab95718e8be6ff38ca04538a837",
+      "capitalUsd": 100
+    },
+    {
+      "pairId": "whale-3",
+      "sourceAddress": "0x7647fc553bc8a03df9affbdc656ae159d894a40c",
+      "targetAddress": "0x23917954da6de7ad4aa85bf384380662ffbbb4a3",
+      "capitalUsd": 100
+    },
+    {
+      "pairId": "whale-4",
+      "sourceAddress": "0x744a26a3e5a56efb7d95119752a63183c236bbd0",
+      "targetAddress": "0x29ec9405911737ed2f75f7ff1e55aadf3a2e18b4",
+      "capitalUsd": 100
+    },
+    {
+      "pairId": "whale-5",
+      "sourceAddress": "0xc16c69d13583ced94245f79afb8751a1883bf2c6",
+      "targetAddress": "0x2cc7adefe7839e657cf7919043507298e362b20a",
+      "capitalUsd": 100
+    }
+  ],
+  "actorConfig": {
+    "immediateResidualNotionalUsd": 10,
+    "targetPositionToleranceBps": 5,
+    "verificationDelayMs": 250,
+    "terminalVerificationDelayMs": 1000,
+    "maxCatchUpSlippageBps": 50,
+    "killOnTerminalResidual": true
+  },
+  "runtime": {
+    "heartbeatMs": 20000,
+    "staleConnectionMs": 50000,
+    "reconnectMaxMs": 30000,
+    "allowApproxUnified": true
+  },
+  "paper": {
+    "takerFeeRate": 0.00045,
+    "makerFeeRate": 0.00015,
+    "defaultSlippageBps": 50
+  },
+  "audit": {
+    "eventsPath": "data/faithful-mirror-v2/events.jsonl",
+    "snapshotPath": "data/faithful-mirror-v2/latest-state.json",
+    "recoveryPath": "data/faithful-mirror-v2/recovery-checkpoint.json",
+    "snapshotIntervalMs": 5000
+  },
+  "control": {
+    "host": "127.0.0.1",
+    "port": 8790
+  },
+  "live": {
+    "exclusiveTargetAccount": true,
+    "adoptExistingTargetState": false
+  }
+}

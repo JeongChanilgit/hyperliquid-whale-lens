@@ -11,9 +11,21 @@ const { d1, r2 } = hostingConfig;
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
+// The Cloudflare dev worker does not automatically receive arbitrary parent
+// process variables. Forward only the two server-side, loopback observability
+// bindings when the managed local launcher supplies them. Vite does not expose
+// these values to browser code because they are Worker vars, not VITE_* vars.
+const localFaithfulMirrorVars = Object.fromEntries(
+  ["FMV2_BASE_URL", "FMV2_CONTROL_TOKEN"].flatMap((key) => {
+    const value = process.env[key]?.trim();
+    return value ? [[key, value]] : [];
+  }),
+);
+
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  vars: localFaithfulMirrorVars,
   d1_databases: d1
     ? [
         {
